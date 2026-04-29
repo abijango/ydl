@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Editor / OS scratch
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
