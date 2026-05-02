@@ -11,8 +11,7 @@ A Rust CLI for downloading YouTube videos, playlists, channels, or arbitrary URL
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Usage](#usage)
-  - [Default (single video)](#default-single-video)
-  - [`video`](#video)
+  - [Single video](#single-video)
   - [`playlist`](#playlist)
   - [`channel`](#channel)
   - [`batch`](#batch)
@@ -77,7 +76,7 @@ If `yt-dlp` and/or `ffmpeg` are already on your `PATH` (e.g. installed via Choco
 ## Quick start
 
 ```bash
-# Single video — bare URL is shorthand for `ydl video <URL>`
+# Single video — just pass the URL
 ydl https://www.youtube.com/watch?v=dQw4w9WgXcQ
 
 # Whole playlist, 3 parallel workers, into ./music
@@ -102,21 +101,13 @@ ydl [OPTIONS] [URL] [COMMAND]
 
 If you pass a URL with no subcommand, `ydl` treats it as a single video. All subcommands accept the same set of [common flags](#common-flags); CLI flags override values from the config file.
 
-### Default (single video)
+### Single video
 
 ```bash
 ydl <URL> [flags]
 ```
 
-Equivalent to `ydl video <URL>`. Downloads exactly one video.
-
-### `video`
-
-```bash
-ydl video <URL> [flags]
-```
-
-Same as the default form. Useful when you want the explicit subcommand for clarity in scripts.
+Downloads exactly one video. This is the default — there is no separate `video` subcommand.
 
 ### `playlist`
 
@@ -188,7 +179,7 @@ ydl playlist <URL> --update
 
 ## Common flags
 
-These apply to `video`, `playlist`, `channel`, and `batch` (and to the bare-URL shortcut).
+These apply to the bare-URL form, `playlist`, `channel`, and `batch`.
 
 | Flag | What it does |
 |---|---|
@@ -296,7 +287,7 @@ ydl channel @SomeChannel --filename-template "{channel}/{upload_date}-{title}.{e
 ydl playlist <URL> --filename-template "{playlist_index:03d}-{title}.{ext}"
 
 # Use yt-dlp syntax directly if you prefer
-ydl video <URL> --filename-template "%(uploader)s - %(title)s.%(ext)s"
+ydl <URL> --filename-template "%(uploader)s - %(title)s.%(ext)s"
 ```
 
 ---

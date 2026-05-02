@@ -6,17 +6,16 @@ use std::path::PathBuf;
     name = "ydl",
     version,
     about = "YouTube downloader built on yt-dlp + ffmpeg",
-    long_about = "If invoked with just a URL (e.g. `ydl <URL>`), behaves like \
-                  `ydl video <URL>`. Use the explicit subcommands for playlists, \
-                  channels, batch files, config, or dependency management.",
+    long_about = "Pass a URL directly (e.g. `ydl <URL>`) to download a single video. \
+                  Use the explicit subcommands for playlists, channels, batch files, \
+                  config, or dependency management.",
     arg_required_else_help = true,
 )]
 pub struct Cli {
-    /// Video URL to download (shortcut for `ydl video <URL>`).
-    /// Ignored when a subcommand is given.
+    /// Video URL to download. Ignored when a subcommand is given.
     pub url: Option<String>,
 
-    /// Options applied to the default-video shortcut. Subcommands have their own copies.
+    /// Options applied when a bare URL is given. Subcommands have their own copies.
     #[command(flatten)]
     pub opts: DownloadOpts,
 
@@ -29,12 +28,6 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Download a single video
-    Video {
-        url: String,
-        #[command(flatten)]
-        opts: DownloadOpts,
-    },
     /// Download every video in a playlist
     Playlist {
         url: String,

@@ -35,32 +35,27 @@ async fn real_main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    let cmd = match (cli.command, cli.url) {
-        (Some(c), _) => c,
-        (None, Some(url)) => Command::Video { url, opts: cli.opts },
-        (None, None) => {
+    match cli.command {
+        None => match cli.url {
+            Some(url) => run_download(vec![url], cli.opts, download::Mode::Single).await,
             // arg_required_else_help should prevent reaching here, but be safe.
-            anyhow::bail!("a URL or subcommand is required (try `ydl --help`)");
-        }
-    };
-
-    match cmd {
-        Command::Video { url, opts } => run_download(vec![url], opts, download::Mode::Single).await,
-        Command::Playlist { url, opts } => {
+            None => anyhow::bail!("a URL or subcommand is required (try `ydl --help`)"),
+        },
+        Some(Command::Playlist { url, opts }) => {
             run_download(vec![url], opts, download::Mode::Playlist).await
         }
-        Command::Channel { url, opts } => {
+        Some(Command::Channel { url, opts }) => {
             run_download(vec![url], opts, download::Mode::Playlist).await
         }
-        Command::Batch { file, opts } => {
+        Some(Command::Batch { file, opts }) => {
             let urls = download::read_batch_file(&file).await?;
             if urls.is_empty() {
                 anyhow::bail!("batch file {} contains no URLs", file.display());
             }
             run_download(urls, opts, download::Mode::Batch).await
         }
-        Command::Config { action } => handle_config(action).await,
-        Command::Deps { action } => handle_deps(action).await,
+        Some(Command::Config { action }) => handle_config(action).await,
+        Some(Command::Deps { action }) => handle_deps(action).await,
     }
 }
 
