@@ -9,6 +9,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 const PROGRESS_PREFIX: &str = "ydl-progress:";
+const FINAL_PATH_PREFIX: &str = "ydl-final:";
+const PLAYLIST_TITLE_PREFIX: &str = "ydl-pl-title:";
+const PLAYLIST_ID_PREFIX: &str = "ydl-pl-id:";
 
 const PROGRESS_TEMPLATE: &str = concat!(
     "ydl-progress:",
@@ -19,6 +22,14 @@ const PROGRESS_TEMPLATE: &str = concat!(
     r#""eta":%(progress.eta,0)d,"#,
     r#""title":%(info.title)j}"#
 );
+
+#[derive(Debug, Default, Clone)]
+pub struct DownloadOutcome {
+    pub title: Option<String>,
+    pub path: Option<PathBuf>,
+    pub bytes: u64,
+    pub skipped: bool,
+}
 
 #[derive(Debug, Deserialize)]
 struct ProgressTick {
@@ -88,12 +99,20 @@ fn output_template(cfg: &Config) -> String {
     }
 }
 
-/// Just enumerate URLs (used by playlist/channel expansion). Returns one ID per line.
-pub async fn flat_playlist_ids(ctx: &DownloadCtx<'_>, url: &str) -> Result<Vec<String>> {
+/// Expand a playlist/channel URL into individual video URLs, and capture a
+/// human-readable playlist title if available.
+pub async fn expand_playlist(
+    ctx: &DownloadCtx<'_>,
+    url: &str,
+) -> Result<(Option<String>, Vec<String>)> {
+    let title_tpl = format!("{PLAYLIST_TITLE_PREFIX}%(playlist_title,channel,uploader)s");
+    let id_tpl = format!("{PLAYLIST_ID_PREFIX}%(url,webpage_url,id)s");
     let out = Command::new(ctx.ytdlp_path)
         .arg("--flat-playlist")
         .arg("--print")
-        .arg("%(url,webpage_url,id)s")
+        .arg(&title_tpl)
+        .arg("--print")
+        .arg(&id_tpl)
         .arg("--no-warnings")
         .arg("--no-colors")
         .arg(url)
@@ -108,11 +127,21 @@ pub async fn flat_playlist_ids(ctx: &DownloadCtx<'_>, url: &str) -> Result<Vec<S
         bail!("yt-dlp --flat-playlist failed: {}", stderr.trim());
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
-    Ok(stdout
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect())
+    let mut title: Option<String> = None;
+    let mut ids: Vec<String> = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if let Some(t) = line.strip_prefix(PLAYLIST_TITLE_PREFIX) {
+            if title.is_none() && !t.is_empty() && t != "NA" {
+                title = Some(t.to_string());
+            }
+        } else if let Some(id) = line.strip_prefix(PLAYLIST_ID_PREFIX) {
+            if !id.is_empty() {
+                ids.push(id.to_string());
+            }
+        }
+    }
+    Ok((title, ids))
 }
 
 pub fn build_args(ctx: &DownloadCtx<'_>, url: &str) -> Vec<String> {
@@ -152,6 +181,8 @@ pub fn build_args(ctx: &DownloadCtx<'_>, url: &str) -> Vec<String> {
     args.push("--no-warnings".into());
     args.push("--progress-template".into());
     args.push(PROGRESS_TEMPLATE.into());
+    args.push("--print".into());
+    args.push(format!("after_move:{FINAL_PATH_PREFIX}%(filepath)s"));
 
     args.extend(cfg.ytdlp.extra_args.iter().cloned());
 
@@ -160,7 +191,11 @@ pub fn build_args(ctx: &DownloadCtx<'_>, url: &str) -> Vec<String> {
 }
 
 /// Download a single URL, driving `pb` with progress updates.
-pub async fn download(ctx: &DownloadCtx<'_>, url: &str, pb: &ProgressBar) -> Result<()> {
+pub async fn download(
+    ctx: &DownloadCtx<'_>,
+    url: &str,
+    pb: &ProgressBar,
+) -> Result<DownloadOutcome> {
     let args = build_args(ctx, url);
     if let Some(d) = ctx.cfg.defaults.output_dir.as_path().parent() {
         let _ = tokio::fs::create_dir_all(d).await;
@@ -182,10 +217,12 @@ pub async fn download(ctx: &DownloadCtx<'_>, url: &str, pb: &ProgressBar) -> Res
 
     let pb_clone = pb.clone();
     let stdout_task = tokio::spawn(async move {
+        let mut outcome = DownloadOutcome::default();
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            handle_stdout_line(&line, &pb_clone);
+            handle_stdout_line(&line, &pb_clone, &mut outcome);
         }
+        outcome
     });
 
     let stderr_task = tokio::spawn(async move {
@@ -201,7 +238,7 @@ pub async fn download(ctx: &DownloadCtx<'_>, url: &str, pb: &ProgressBar) -> Res
         tail
     });
 
-    let _ = stdout_task.await;
+    let mut outcome = stdout_task.await.unwrap_or_default();
     let stderr_tail = stderr_task.await.unwrap_or_default();
     let status = child.wait().await.context("wait yt-dlp")?;
     if !status.success() {
@@ -212,21 +249,37 @@ pub async fn download(ctx: &DownloadCtx<'_>, url: &str, pb: &ProgressBar) -> Res
             joined.trim()
         );
     }
-    pb.finish_with_message("done");
-    Ok(())
+
+    if !outcome.skipped {
+        if let Some(p) = &outcome.path {
+            if let Ok(meta) = tokio::fs::metadata(p).await {
+                outcome.bytes = meta.len();
+            }
+        }
+    }
+
+    pb.finish_with_message(if outcome.skipped { "skipped" } else { "done" });
+    Ok(outcome)
 }
 
-fn handle_stdout_line(line: &str, pb: &ProgressBar) {
+fn handle_stdout_line(line: &str, pb: &ProgressBar, outcome: &mut DownloadOutcome) {
     if let Some(rest) = line.strip_prefix(PROGRESS_PREFIX) {
         match serde_json::from_str::<ProgressTick>(rest) {
-            Ok(tick) => apply_tick(&tick, pb),
+            Ok(tick) => apply_tick(&tick, pb, outcome),
             Err(e) => tracing::trace!("progress parse error: {e} | line: {rest}"),
         }
         return;
     }
+    if let Some(p) = line.strip_prefix(FINAL_PATH_PREFIX) {
+        let p = p.trim();
+        if !p.is_empty() && p != "NA" {
+            outcome.path = Some(PathBuf::from(p));
+        }
+        return;
+    }
     if line.contains("[download]") && line.contains("has already been recorded") {
+        outcome.skipped = true;
         pb.set_message("skipped (in archive)");
-        pb.finish_with_message("skipped");
         return;
     }
     if line.contains("[Merger]") {
@@ -235,8 +288,9 @@ fn handle_stdout_line(line: &str, pb: &ProgressBar) {
     tracing::debug!(target: "yt-dlp", "{}", line);
 }
 
-fn apply_tick(t: &ProgressTick, pb: &ProgressBar) {
+fn apply_tick(t: &ProgressTick, pb: &ProgressBar, outcome: &mut DownloadOutcome) {
     if !t.title.is_empty() {
+        outcome.title = Some(t.title.clone());
         pb.set_message(t.title.clone());
     }
     match t.status.as_str() {

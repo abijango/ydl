@@ -5,6 +5,7 @@ mod deps;
 mod download;
 mod error;
 mod progress;
+mod summary;
 mod ytdlp;
 
 use clap::Parser;
