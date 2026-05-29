@@ -30,14 +30,29 @@ Grab the latest installer for your platform from the [**Releases**](https://gith
 | Platform | File |
 |---|---|
 | macOS (Apple Silicon + Intel) | `ydl_<version>_universal.dmg` |
-| Windows | `ydl_<version>_x64-setup.exe` (or the `.msi`) |
+| Windows | `ydl_<version>_x64-setup.exe` |
 
 Builds are currently **unsigned**, so confirm once on first launch:
 
 - **macOS** — right-click the app → **Open** → confirm (Gatekeeper).
 - **Windows** — **More info** → **Run anyway** (SmartScreen).
 
-`yt-dlp` installs automatically on first download; on macOS, install ffmpeg with `brew install ffmpeg`.
+`yt-dlp` and `ffmpeg` install automatically on first download (no Homebrew needed).
+
+### Grab the installers from the command line
+
+Handy for re-downloading to share. Requires the [GitHub CLI](https://cli.github.com/) (`gh auth login` once):
+
+```bash
+# Latest release → ./ydl-latest/
+gh release download --repo abijango/ydl \
+  --pattern "*.dmg" --pattern "*_x64-setup.exe" \
+  --dir ydl-latest --clobber
+
+# A specific version
+gh release download v2026.5.9 --repo abijango/ydl \
+  --pattern "*.dmg" --pattern "*_x64-setup.exe"
+```
 
 ### What it does
 
