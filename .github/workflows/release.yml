@@ -6,6 +6,9 @@ name: Release
 on:
   push:
     branches: [main]
+    paths-ignore: # doc-only changes shouldn't spend a full cross-platform build
+      - "**.md"
+      - "LICENSE"
   workflow_dispatch: {} # allow manual "Run workflow" for ad-hoc builds
 
 permissions:

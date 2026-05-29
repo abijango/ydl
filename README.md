@@ -1,58 +1,19 @@
 # ydl
 
-A Rust CLI for downloading YouTube videos, playlists, channels, or arbitrary URL lists. Built on top of `yt-dlp` for extraction and `ffmpeg` for muxing/conversion, with thick `indicatif` progress bars (percent, bytes, speed, ETA), a TOML config file for defaults, configurable parallelism, and incremental skipping of already-downloaded videos.
+**ydl** is a fast, clean **desktop app** for downloading YouTube videos, playlists, and channels — with a full **command-line interface** on the side for scripting and power use. Both are built on `yt-dlp` (extraction) and `ffmpeg` (muxing), share a single Rust engine, and manage their own copies of both tools — so there's no separate yt-dlp/ffmpeg install.
 
-`ydl` manages its own copies of `yt-dlp` and `ffmpeg` — no separate installation step required.
-
-There is also a **desktop app** (Tauri + React) that reuses the same core engine — see [Desktop app](#desktop-app).
-
----
-
-## Desktop app
-
-A polished desktop UI (Tauri v2 backend + React/Tailwind frontend) lives alongside the
-CLI. Both share the same `ydl` core library (`src/lib.rs`): the download pipeline emits
-structured events through an [`EventSink`](src/event.rs), which the CLI renders as
-`indicatif` bars and the GUI streams to the webview.
-
-```
-src/          # ydl core library + CLI binary (shared engine)
-src-tauri/    # Tauri backend (commands + event bridge)
-ui/           # React frontend (Vite + Tailwind v4)
-```
-
-Run it in development (needs Node 18+ and the Rust toolchain):
-
-```bash
-npm install          # one-time: frontend deps + Tauri CLI
-npm run tauri dev    # launches the desktop window with hot reload
-```
-
-Build a distributable bundle:
-
-```bash
-npm run tauri build  # produces a native app under target/release/bundle/
-```
-
-The GUI exposes the MVP surface: paste a URL (single / playlist / channel auto-detected),
-watch live per-item progress (speed, ETA, state), edit settings (output dir, quality,
-parallelism, …), and see dependency status — all backed by the same config file the CLI uses.
+- 🖥️ **Desktop app** — paste a URL, watch live per-item progress (speed/ETA), and manage settings and dependencies in a clean window. → [Install](#install-the-desktop-app)
+- ⌨️ **CLI** — the same engine, scriptable, with thick progress bars, a TOML config, parallelism, and incremental skip. → [Use the CLI](#command-line-interface)
 
 ---
 
 ## Table of contents
 
-- [Desktop app](#desktop-app)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Usage](#usage)
-  - [Single video](#single-video)
-  - [`playlist`](#playlist)
-  - [`channel`](#channel)
-  - [`batch`](#batch)
-  - [`config`](#config)
-  - [`deps`](#deps)
-- [Common flags](#common-flags)
+- [Install the desktop app](#install-the-desktop-app)
+- [Command-line interface](#command-line-interface)
+  - [Quick start](#quick-start)
+  - [Usage](#usage)
+  - [Common flags](#common-flags)
 - [Configuration file](#configuration-file)
 - [Filename templates](#filename-templates)
 - [Incremental sync (resume / skip)](#incremental-sync-resume--skip)
@@ -62,7 +23,58 @@ parallelism, …), and see dependency status — all backed by the same config f
 
 ---
 
-## Installation
+## Install the desktop app
+
+Grab the latest installer for your platform from the [**Releases**](https://github.com/abijango/ydl/releases/latest) page:
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon + Intel) | `ydl_<version>_universal.dmg` |
+| Windows | `ydl_<version>_x64-setup.exe` (or the `.msi`) |
+
+Builds are currently **unsigned**, so confirm once on first launch:
+
+- **macOS** — right-click the app → **Open** → confirm (Gatekeeper).
+- **Windows** — **More info** → **Run anyway** (SmartScreen).
+
+`yt-dlp` installs automatically on first download; on macOS, install ffmpeg with `brew install ffmpeg`.
+
+### What it does
+
+Paste a URL — single video, playlist, or channel, auto-detected — and watch live per-item
+progress (speed, ETA, state). Edit settings (output directory, human-readable quality presets,
+parallelism, filename template, archive) and install/update `yt-dlp`/`ffmpeg` from within the
+app. Everything is backed by the same TOML config the CLI uses, so the two stay in sync.
+
+### Develop & build it yourself
+
+The app is a **Tauri v2** backend + **React/Tailwind** frontend that shares the `ydl` core
+library (`src/lib.rs`): the download pipeline emits structured events through an
+[`EventSink`](src/event.rs), which the CLI renders as `indicatif` bars and the GUI streams to
+its window.
+
+```
+src/          # ydl core library + CLI binary (shared engine)
+src-tauri/    # Tauri backend (commands + event bridge)
+ui/           # React frontend (Vite + Tailwind v4)
+```
+
+```bash
+npm install          # one-time: frontend deps + Tauri CLI
+npm run tauri dev    # dev window with hot reload
+npm run tauri build  # bundle installers into target/release/bundle/
+```
+
+Every push to `main` also auto-builds and publishes the macOS + Windows installers via GitHub
+Actions (CalVer `YYYY.M.<commit-count>`).
+
+---
+
+## Command-line interface
+
+The CLI runs the **same engine** as the desktop app — handy for scripting, servers, headless
+boxes, and power use. It reads and writes the same config file, so settings carry over both ways.
+Install it from source:
 
 ### Option A — install from source (recommended)
 
@@ -391,17 +403,23 @@ Check that `[archive].enabled = true` in the config and that the `.ydl-archive` 
 
 ## Building from source
 
+The repo is a Cargo workspace: the `ydl` package is both the **core library** and the **CLI
+binary**, and `ydl-gui` (under `src-tauri/`) is the desktop backend.
+
 ```bash
-# Clone and build
 git clone <this repo url> ydl
 cd ydl
-cargo build --release
 
-# Run unit tests
-cargo test
+# CLI only — just the `ydl` package
+cargo build --release -p ydl     # → target/release/ydl(.exe)
+cargo test                       # unit tests live in the core library
 
-# Strip + LTO are already enabled in the release profile; the resulting
-# `target/release/ydl(.exe)` is ~6 MB on Windows.
+# Desktop app — needs Node + the Tauri toolchain
+npm install
+npm run tauri build              # → target/release/bundle/
 ```
 
-The crate has no `build.rs` and no native dependencies on Windows beyond what `rustls` and `xz2` need, both of which build cleanly from source.
+Strip + LTO are enabled in the release profile, so the CLI binary is ~6 MB. The CLI has no
+native dependencies on Windows beyond what `rustls` and `xz2` need (both build cleanly from
+source); the desktop app additionally uses the OS WebView (WebView2 on Windows, WKWebView on
+macOS) and is bundled per-platform by GitHub Actions on every push.
