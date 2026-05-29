@@ -103,8 +103,19 @@ pub fn resolve(cfg: &Config, tool: Tool) -> Result<Option<PathBuf>> {
 }
 
 fn which_on_path(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    // macOS GUI apps launched from Finder/Dock inherit a minimal PATH that omits
+    // Homebrew, so also probe the common install locations. Harmless elsewhere
+    // (these dirs simply won't exist on Windows).
+    for extra in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+        let p = PathBuf::from(extra);
+        if !dirs.contains(&p) {
+            dirs.push(p);
+        }
+    }
+    for dir in dirs {
         let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);
@@ -288,20 +299,22 @@ async fn install_ytdlp(mp: &MultiProgress, target: &Path) -> Result<()> {
 // ---------- ffmpeg ----------
 
 enum FfmpegSource {
-    BtbnZip(String),    // windows
-    BtbnTarXz(String),  // linux
-    Unsupported(&'static str),
+    BtbnZip(String),   // windows
+    BtbnTarXz(String), // linux
+    RawBinary(String), // macOS — a direct ffmpeg binary, no archive to extract
 }
 
 fn ffmpeg_asset_url() -> Result<String> {
     Ok(match ffmpeg_source()? {
-        FfmpegSource::BtbnZip(u) | FfmpegSource::BtbnTarXz(u) => u,
-        FfmpegSource::Unsupported(reason) => bail!("ffmpeg auto-install: {reason}"),
+        FfmpegSource::BtbnZip(u) | FfmpegSource::BtbnTarXz(u) | FfmpegSource::RawBinary(u) => u,
     })
 }
 
 fn ffmpeg_source() -> Result<FfmpegSource> {
     let base = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest";
+    // macOS: BtbN ships no Mac build, so pull an arch-native static binary from
+    // eugeneware/ffmpeg-static (direct executables, no archive).
+    let mac_base = "https://github.com/eugeneware/ffmpeg-static/releases/latest/download";
     Ok(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("windows", _) => FfmpegSource::BtbnZip(format!(
             "{base}/ffmpeg-master-latest-win64-gpl.zip"
@@ -312,9 +325,8 @@ fn ffmpeg_source() -> Result<FfmpegSource> {
         ("linux", _) => FfmpegSource::BtbnTarXz(format!(
             "{base}/ffmpeg-master-latest-linux64-gpl.tar.xz"
         )),
-        ("macos", _) => FfmpegSource::Unsupported(
-            "no auto-install available for macOS. Install via `brew install ffmpeg` or set [ffmpeg].binary in config",
-        ),
+        ("macos", "aarch64") => FfmpegSource::RawBinary(format!("{mac_base}/ffmpeg-darwin-arm64")),
+        ("macos", _) => FfmpegSource::RawBinary(format!("{mac_base}/ffmpeg-darwin-x64")),
         (os, arch) => return Err(anyhow!("ffmpeg auto-install: unsupported platform {os}/{arch}")),
     })
 }
@@ -334,7 +346,17 @@ async fn install_ffmpeg(mp: &MultiProgress, bin_dir: &Path) -> Result<()> {
             extract_ffmpeg_tar_xz(&tmp, &target).await?;
             let _ = fs::remove_file(&tmp).await;
         }
-        FfmpegSource::Unsupported(reason) => bail!("{reason}"),
+        FfmpegSource::RawBinary(url) => {
+            // The asset is the ffmpeg executable itself — download and move into place.
+            let tmp = target.with_extension("tmp");
+            download_with_progress(&url, &tmp, mp, "ffmpeg").await?;
+            if target.exists() {
+                let _ = fs::remove_file(&target).await;
+            }
+            fs::rename(&tmp, &target)
+                .await
+                .with_context(|| format!("rename to {}", target.display()))?;
+        }
     }
     chmod_exec(&target).await?;
     Ok(())

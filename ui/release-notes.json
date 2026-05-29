@@ -1,5 +1,14 @@
 [
   {
+    "version": "2026.5.9",
+    "date": "May 2026",
+    "headline": "macOS, sorted 🍎",
+    "notes": [
+      "🍎 ffmpeg now installs itself on macOS — no Homebrew required.",
+      "🔎 Finds an already-installed ffmpeg even when opened from the Dock."
+    ]
+  },
+  {
     "version": "2026.5.8",
     "date": "May 2026",
     "headline": "Notes that match 📝",
