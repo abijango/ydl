@@ -1,6 +1,6 @@
 import { cn, humanBytes, humanEta, humanSpeed } from "@/lib/utils";
 import type { DownloadItem, DownloadState } from "@/lib/download";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { revealPath } from "@/lib/api";
 import { Check, FolderOpen, Loader2, SkipForward, TriangleAlert } from "lucide-react";
 
 const STATE_META: Record<DownloadState, { label: string; color: string; dot: string }> = {
@@ -82,8 +82,16 @@ export function DownloadCard({ item, index }: { item: DownloadItem; index: numbe
         ) : (
           <>
             <span className="tabular-nums">
-              {item.total > 0 ? `${humanBytes(item.downloaded)} / ${humanBytes(item.total)}` : humanBytes(item.downloaded)}
-              {p !== null && <span className="ml-2 text-[var(--color-faint)]">{p.toFixed(0)}%</span>}
+              {item.state === "done"
+                ? humanBytes(item.bytes)
+                : item.state === "skipped"
+                  ? "already downloaded"
+                  : item.total > 0
+                    ? `${humanBytes(item.downloaded)} / ${humanBytes(item.total)}`
+                    : humanBytes(item.downloaded)}
+              {p !== null && item.state !== "done" && item.state !== "skipped" && (
+                <span className="ml-2 text-[var(--color-faint)]">{p.toFixed(0)}%</span>
+              )}
             </span>
             <span className="flex items-center gap-4 tabular-nums">
               {item.state === "downloading" && (
@@ -94,11 +102,11 @@ export function DownloadCard({ item, index }: { item: DownloadItem; index: numbe
               )}
               {item.path && (item.state === "done" || item.state === "skipped") && (
                 <button
-                  onClick={() => openPath(item.path!).catch(() => {})}
+                  onClick={() => revealPath(item.path!).catch(() => {})}
                   className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[var(--color-faint)] transition-colors hover:text-[var(--color-accent)]"
                   title={item.path}
                 >
-                  <FolderOpen className="h-3.5 w-3.5" /> open
+                  <FolderOpen className="h-3.5 w-3.5" /> reveal
                 </button>
               )}
             </span>

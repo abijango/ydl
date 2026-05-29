@@ -179,6 +179,10 @@ pub fn build_args(ctx: &DownloadCtx<'_>, url: &str) -> Vec<String> {
     args.push("--progress".into());
     args.push("--no-colors".into());
     args.push("--no-warnings".into());
+    // `--print` (below) forces yt-dlp into quiet mode, which suppresses the
+    // "has already been recorded in the archive" line we rely on to detect
+    // skips. `--no-quiet` restores it without affecting the progress template.
+    args.push("--no-quiet".into());
     args.push("--progress-template".into());
     args.push(PROGRESS_TEMPLATE.into());
     args.push("--print".into());

@@ -1,6 +1,5 @@
-import type { SummaryDto } from "@/lib/api";
+import { revealPath, type SummaryDto } from "@/lib/api";
 import { IconButton } from "./ui";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { cn, humanEta } from "@/lib/utils";
 import { CheckCircle2, FolderOpen, X, XCircle } from "lucide-react";
 
@@ -39,7 +38,7 @@ export function SummaryBanner({ summary, onClose }: { summary: SummaryDto; onClo
           </dl>
           {!summary.dryRun && (
             <button
-              onClick={() => openPath(summary.directory).catch(() => {})}
+              onClick={() => revealPath(summary.directory).catch(() => {})}
               className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-accent)] transition-opacity hover:opacity-80"
             >
               <FolderOpen className="h-3.5 w-3.5" /> Open folder

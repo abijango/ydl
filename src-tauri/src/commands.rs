@@ -1,6 +1,7 @@
 //! Tauri commands — thin wrappers that reuse the `ydl` core library.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 use ydl::cli::DownloadOpts;
 use ydl::config::{self, Config};
@@ -11,6 +12,87 @@ use crate::sink::TauriSink;
 
 fn err(e: impl std::fmt::Display) -> String {
     format!("{e:#}")
+}
+
+/// The app's own version (CalVer, baked in at build time). Shown in the UI.
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Reveal a path in the OS file manager. Directories open directly; files are
+/// revealed (highlighted) in their containing folder. Done in Rust so it
+/// bypasses the JS opener plugin's path-allowlist scope.
+#[tauri::command]
+pub fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let is_dir = std::path::Path::new(&path).is_dir();
+    if is_dir {
+        app.opener().open_path(path, None::<&str>).map_err(err)
+    } else {
+        app.opener().reveal_item_in_dir(path).map_err(err)
+    }
+}
+
+// ── Download history ──────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct HistoryEntry {
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    pub path: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub bytes: u64,
+    pub ts: i64, // epoch milliseconds
+}
+
+fn history_path() -> Result<PathBuf, String> {
+    Ok(config::data_dir().map_err(err)?.join("history.json"))
+}
+
+fn read_history_file() -> Vec<HistoryEntry> {
+    history_path()
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_history_file(items: &[HistoryEntry]) -> Result<(), String> {
+    let p = history_path()?;
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(err)?;
+    }
+    std::fs::write(&p, serde_json::to_string_pretty(items).map_err(err)?).map_err(err)
+}
+
+#[tauri::command]
+pub fn get_history() -> Vec<HistoryEntry> {
+    read_history_file()
+}
+
+#[tauri::command]
+pub fn add_history(entry: HistoryEntry) -> Result<(), String> {
+    let mut items = read_history_file();
+    items.retain(|e| e.id != entry.id); // de-dup by id
+    items.insert(0, entry); // newest first
+    items.truncate(1000); // keep history bounded
+    write_history_file(&items)
+}
+
+#[tauri::command]
+pub fn remove_history(id: String) -> Result<(), String> {
+    let mut items = read_history_file();
+    items.retain(|e| e.id != id);
+    write_history_file(&items)
+}
+
+#[tauri::command]
+pub fn clear_history() -> Result<(), String> {
+    write_history_file(&[])
 }
 
 /// Load the resolved config (creating a default file on first run).

@@ -14,6 +14,8 @@ export interface DownloadItem {
   title?: string;
   downloaded: number;
   total: number;
+  /** Final on-disk size of the merged file, from the Completed event. */
+  bytes: number;
   speed: number;
   eta: number;
   state: DownloadState;
@@ -51,6 +53,7 @@ export function applyEvent(
         url: e.url,
         downloaded: 0,
         total: 0,
+        bytes: 0,
         speed: 0,
         eta: 0,
         state: "starting",
@@ -83,6 +86,7 @@ export function applyEvent(
           title: e.title ?? cur.title,
           path: e.path ?? cur.path,
           downloaded: e.skipped ? cur.downloaded : cur.total || cur.downloaded,
+          bytes: e.bytes, // authoritative final size of the merged file
           speed: 0,
           eta: 0,
         });

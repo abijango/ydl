@@ -1,6 +1,6 @@
 use crate::cli::DownloadOpts;
 use crate::error::{Context, Result};
-use directories::ProjectDirs;
+use directories::{ProjectDirs, UserDirs};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -66,13 +66,23 @@ impl Default for Config {
 impl Default for Defaults {
     fn default() -> Self {
         Self {
-            output_dir: PathBuf::from("."),
+            output_dir: default_output_dir(),
             filename_template: "{upload_date}-{title}.{ext}".to_string(),
             quality: "bv*+ba/b".to_string(),
             merge_format: "mp4".to_string(),
             audio_only: false,
         }
     }
+}
+
+/// Default download location: the OS "videos" directory under a `ydl` subfolder
+/// (`~/Movies/ydl` on macOS, `~/Videos/ydl` on Windows/Linux). Chosen over
+/// `~/Downloads` to avoid macOS's protected-folder permission prompts. Falls
+/// back to the current directory if the OS dirs can't be resolved.
+fn default_output_dir() -> PathBuf {
+    UserDirs::new()
+        .and_then(|u| u.video_dir().map(|v| v.join("ydl")))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 impl Default for Parallel {

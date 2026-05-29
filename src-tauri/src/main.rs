@@ -16,6 +16,12 @@ fn main() {
             commands::install_deps,
             commands::update_dep,
             commands::start_download,
+            commands::reveal_path,
+            commands::app_version,
+            commands::get_history,
+            commands::add_history,
+            commands::remove_history,
+            commands::clear_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ydl-gui");

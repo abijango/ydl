@@ -83,6 +83,28 @@ export const updateDep = (name: string) => invoke<void>("update_dep", { name });
 export const startDownload = (urls: string, audioOnly: boolean) =>
   invoke<void>("start_download", { urls, audioOnly });
 
+/** Reveal a file (highlighted in its folder) or open a directory in the OS file manager. */
+export const revealPath = (path: string) => invoke<void>("reveal_path", { path });
+
+/** The app's own version (CalVer), baked in at build time. */
+export const appVersion = () => invoke<string>("app_version");
+
+// ── Download history ──────────────────────────────────────────────────────────
+
+export interface HistoryEntry {
+  id: string;
+  title: string | null;
+  path: string;
+  url: string | null;
+  bytes: number;
+  ts: number; // epoch ms
+}
+
+export const getHistory = () => invoke<HistoryEntry[]>("get_history");
+export const addHistory = (entry: HistoryEntry) => invoke<void>("add_history", { entry });
+export const removeHistory = (id: string) => invoke<void>("remove_history", { id });
+export const clearHistory = () => invoke<void>("clear_history");
+
 // ── Events ──────────────────────────────────────────────────────────────────
 
 export const onDownloadEvent = (cb: (e: DownloadEvent) => void): Promise<UnlistenFn> =>
