@@ -16,6 +16,12 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Use bash everywhere (incl. Windows' Git Bash) so `$VERSION`-style env refs in
+# run: steps behave consistently — PowerShell would not expand them.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   version:
     runs-on: ubuntu-latest
