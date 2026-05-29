@@ -1,16 +1,10 @@
-mod archive;
-mod cli;
-mod config;
-mod deps;
-mod download;
-mod error;
-mod progress;
-mod summary;
-mod ytdlp;
+mod cli_sink;
 
 use clap::Parser;
-use cli::{Cli, Command, ConfigAction, DepsAction, DownloadOpts};
-use error::{Context, Result};
+use cli_sink::CliSink;
+use ydl::cli::{Cli, Command, ConfigAction, DepsAction, DownloadOpts};
+use ydl::error::{Context, Result};
+use ydl::{config, deps, download, summary};
 
 fn init_tracing(verbose: u8) {
     use tracing_subscriber::{fmt, EnvFilter};
@@ -69,7 +63,16 @@ async fn run_download(urls: Vec<String>, opts: DownloadOpts, mode: download::Mod
         deps::update_all().await?;
     }
 
-    download::run(&cfg, &opts, urls, mode).await
+    let sink = CliSink::new(cfg.parallel.jobs.max(1));
+    let summary = download::run_with_sink(&cfg, &opts, urls, mode, &sink).await?;
+    let failures = summary.failure_count();
+    sink.finish(failures);
+    summary::render(&summary);
+
+    if failures > 0 {
+        anyhow::bail!("{failures} download(s) failed");
+    }
+    Ok(())
 }
 
 async fn handle_config(action: ConfigAction) -> Result<()> {

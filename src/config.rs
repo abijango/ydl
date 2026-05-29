@@ -153,6 +153,19 @@ pub fn write_default(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Serialize `cfg` to the standard config path, creating parent dirs as needed.
+/// Used by UIs (e.g. the desktop app) to persist edited settings.
+pub fn save(cfg: &Config) -> Result<()> {
+    let path = config_path()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("create config dir {}", dir.display()))?;
+    }
+    let toml = toml::to_string_pretty(cfg).context("serialize config")?;
+    std::fs::write(&path, toml).with_context(|| format!("write config to {}", path.display()))?;
+    Ok(())
+}
+
 /// Apply CLI overrides on top of the loaded config.
 pub fn merge_opts(cfg: &mut Config, opts: &DownloadOpts) {
     if let Some(d) = &opts.output_dir {

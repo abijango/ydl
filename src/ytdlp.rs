@@ -1,7 +1,7 @@
 use crate::archive;
 use crate::config::Config;
 use crate::error::{bail, Context, Result};
-use indicatif::ProgressBar;
+use crate::event::{DownloadEvent, EventSink};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -190,11 +190,12 @@ pub fn build_args(ctx: &DownloadCtx<'_>, url: &str) -> Vec<String> {
     args
 }
 
-/// Download a single URL, driving `pb` with progress updates.
-pub async fn download(
+/// Download a single URL, emitting progress events for `id` through `sink`.
+pub async fn download<S: EventSink>(
     ctx: &DownloadCtx<'_>,
     url: &str,
-    pb: &ProgressBar,
+    id: u64,
+    sink: &S,
 ) -> Result<DownloadOutcome> {
     let args = build_args(ctx, url);
     if let Some(d) = ctx.cfg.defaults.output_dir.as_path().parent() {
@@ -202,7 +203,10 @@ pub async fn download(
     }
     let _ = tokio::fs::create_dir_all(&ctx.cfg.defaults.output_dir).await;
 
-    pb.set_message("starting…");
+    sink.emit(DownloadEvent::Status {
+        id,
+        message: "starting…".into(),
+    });
     let mut child = Command::new(ctx.ytdlp_path)
         .args(&args)
         .stdin(Stdio::null())
@@ -215,12 +219,12 @@ pub async fn download(
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
 
-    let pb_clone = pb.clone();
+    let sink_clone = sink.clone();
     let stdout_task = tokio::spawn(async move {
         let mut outcome = DownloadOutcome::default();
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            handle_stdout_line(&line, &pb_clone, &mut outcome);
+            handle_stdout_line(&line, id, &sink_clone, &mut outcome);
         }
         outcome
     });
@@ -258,14 +262,18 @@ pub async fn download(
         }
     }
 
-    pb.finish_with_message(if outcome.skipped { "skipped" } else { "done" });
     Ok(outcome)
 }
 
-fn handle_stdout_line(line: &str, pb: &ProgressBar, outcome: &mut DownloadOutcome) {
+fn handle_stdout_line<S: EventSink>(
+    line: &str,
+    id: u64,
+    sink: &S,
+    outcome: &mut DownloadOutcome,
+) {
     if let Some(rest) = line.strip_prefix(PROGRESS_PREFIX) {
         match serde_json::from_str::<ProgressTick>(rest) {
-            Ok(tick) => apply_tick(&tick, pb, outcome),
+            Ok(tick) => apply_tick(&tick, id, sink, outcome),
             Err(e) => tracing::trace!("progress parse error: {e} | line: {rest}"),
         }
         return;
@@ -279,40 +287,51 @@ fn handle_stdout_line(line: &str, pb: &ProgressBar, outcome: &mut DownloadOutcom
     }
     if line.contains("[download]") && line.contains("has already been recorded") {
         outcome.skipped = true;
-        pb.set_message("skipped (in archive)");
+        sink.emit(DownloadEvent::Status {
+            id,
+            message: "skipped (in archive)".into(),
+        });
         return;
     }
     if line.contains("[Merger]") {
-        pb.set_message("merging…");
+        sink.emit(DownloadEvent::Status {
+            id,
+            message: "merging…".into(),
+        });
     }
     tracing::debug!(target: "yt-dlp", "{}", line);
 }
 
-fn apply_tick(t: &ProgressTick, pb: &ProgressBar, outcome: &mut DownloadOutcome) {
-    if !t.title.is_empty() {
+fn apply_tick<S: EventSink>(t: &ProgressTick, id: u64, sink: &S, outcome: &mut DownloadOutcome) {
+    let title = if t.title.is_empty() {
+        None
+    } else {
         outcome.title = Some(t.title.clone());
-        pb.set_message(t.title.clone());
-    }
+        Some(t.title.clone())
+    };
     match t.status.as_str() {
-        "downloading" => {
-            if t.total > 0 {
-                pb.set_length(t.total);
-            }
-            pb.set_position(t.downloaded);
-        }
-        "finished" => {
-            if t.total > 0 {
-                pb.set_length(t.total);
-                pb.set_position(t.total);
-            }
-        }
-        "error" => {
-            pb.set_message("error");
-        }
+        "downloading" => sink.emit(DownloadEvent::Progress {
+            id,
+            downloaded: t.downloaded,
+            total: t.total,
+            speed: t.speed,
+            eta: t.eta,
+            title,
+        }),
+        "finished" => sink.emit(DownloadEvent::Progress {
+            id,
+            downloaded: if t.total > 0 { t.total } else { t.downloaded },
+            total: t.total,
+            speed: 0.0,
+            eta: 0,
+            title,
+        }),
+        "error" => sink.emit(DownloadEvent::Status {
+            id,
+            message: "error".into(),
+        }),
         _ => {}
     }
-    let _ = t.speed; // indicatif derives bytes_per_sec from positions
-    let _ = t.eta;
 }
 
 #[cfg(test)]
@@ -331,11 +350,4 @@ mod tests {
     fn passes_through_native_syntax() {
         assert_eq!(translate_template("%(title)s.%(ext)s"), "%(title)s.%(ext)s");
     }
-}
-
-// keep PathBuf in scope for the public surface; suppresses unused warnings on platforms
-// that may not exercise every helper above.
-#[allow(dead_code)]
-fn _path_buf_keepalive(p: PathBuf) -> PathBuf {
-    p
 }

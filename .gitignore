@@ -2,6 +2,12 @@
 **/*.rs.bk
 Cargo.lock.bak
 
+# Frontend / Tauri
+/node_modules
+/dist
+/src-tauri/gen
+app-icon.png
+
 # Editor / OS scratch
 .idea/
 .vscode/

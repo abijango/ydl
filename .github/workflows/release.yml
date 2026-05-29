@@ -1,0 +1,99 @@
+name: Release
+
+# Every push to main cuts a new CalVer release (YYYY.M.<commit-count>) and
+# publishes signed-less macOS + Windows installers to a GitHub Release.
+# No manual review: the release is published directly (not a draft).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # allow manual "Run workflow" for ad-hoc builds
+
+permissions:
+  contents: write # required to create releases and upload assets
+
+# Serialize releases so concurrent pushes don't race on the GitHub Release API.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.calver.outputs.version }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the commit count is accurate
+      - id: calver
+        run: |
+          echo "version=$(date -u +%Y).$(date -u +%-m).$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+      - id: notes
+        # One-line, human-readable release note = the subject of the triggering
+        # commit. Captured via a heredoc delimiter so an odd commit message can't
+        # inject extra step outputs.
+        run: |
+          {
+            echo "notes<<__YDL_EOF__"
+            git log -1 --pretty=%s
+            echo "__YDL_EOF__"
+          } >> "$GITHUB_OUTPUT"
+      - name: Log version
+        env:
+          VERSION: ${{ steps.calver.outputs.version }}
+        run: echo "Releasing v$VERSION"
+
+  release:
+    needs: version
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest # Apple Silicon runner; builds a universal binary
+            args: "--target universal-apple-darwin"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+            rust_targets: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Stamp version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: node scripts/set-version.mjs "$VERSION"
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v${{ needs.version.outputs.version }}
+          releaseName: "ydl v${{ needs.version.outputs.version }}"
+          releaseBody: |
+            ${{ needs.version.outputs.notes }}
+
+            _Unsigned — macOS: right-click → Open · Windows: More info → Run anyway. yt-dlp & ffmpeg install on first use._
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

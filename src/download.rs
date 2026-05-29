@@ -2,15 +2,14 @@ use crate::cli::DownloadOpts;
 use crate::config::Config;
 use crate::deps::{self, Tool};
 use crate::error::{Context, Result};
-use crate::progress;
-use crate::summary::{self, Kind, Summary};
+use crate::event::{DownloadEvent, EventSink};
+use crate::summary::{Kind, Summary};
 use crate::ytdlp::{self, DownloadCtx, DownloadOutcome};
 use futures::stream::{FuturesUnordered, StreamExt};
-use indicatif::MultiProgress;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::Semaphore;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Mode {
@@ -19,11 +18,40 @@ pub enum Mode {
     Batch,
 }
 
-pub async fn run(cfg: &Config, opts: &DownloadOpts, urls: Vec<String>, mode: Mode) -> Result<()> {
+/// Classify a URL into the download mode it most likely needs.
+///
+/// Used by UIs that accept a single pasted URL and want to pick the right mode
+/// automatically. Heuristic, not authoritative — yt-dlp has the final say.
+pub fn classify_url(url: &str) -> Mode {
+    let u = url.to_ascii_lowercase();
+    // Channels and playlists both expand to a set of videos (Mode::Playlist).
+    let is_collection = u.contains("/@")
+        || u.contains("/channel/")
+        || u.contains("/c/")
+        || u.contains("/user/")
+        || u.contains("list=")
+        || u.contains("/playlist");
+    if is_collection {
+        Mode::Playlist
+    } else {
+        Mode::Single
+    }
+}
+
+/// Run a download set, emitting progress through `sink`, and return the
+/// aggregated [`Summary`]. This is the single orchestration entry point shared
+/// by the CLI and the desktop app; it performs no rendering of its own.
+pub async fn run_with_sink<S: EventSink>(
+    cfg: &Config,
+    opts: &DownloadOpts,
+    urls: Vec<String>,
+    mode: Mode,
+    sink: &S,
+) -> Result<Summary> {
     let start = Instant::now();
 
     if opts.dry_run {
-        return run_dry(cfg, opts, urls, mode).await;
+        return run_dry(cfg, opts, urls, mode, sink).await;
     }
 
     let ytdlp_path = deps::ensure(cfg, Tool::YtDlp, opts.yes, opts.no_autoinstall)
@@ -53,49 +81,51 @@ pub async fn run(cfg: &Config, opts: &DownloadOpts, urls: Vec<String>, mode: Mod
         urls
     };
 
-    let total = urls.len() as u64;
-    let mp = MultiProgress::new();
-    let overall = if total > 1 {
-        let pb = progress::make_overall_bar(&mp, total);
-        pb.set_message("downloading…");
-        Some(pb)
-    } else {
-        None
-    };
+    sink.emit(DownloadEvent::Expanded {
+        total: urls.len(),
+        playlist_title: playlist_title.clone(),
+    });
 
     let jobs = cfg.parallel.jobs.max(1);
     let sem = Arc::new(Semaphore::new(jobs));
-    let slot_pool: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new((0..jobs).collect()));
-    let mp = Arc::new(mp);
     let cfg_arc = Arc::new(cfg.clone());
     let ytdlp_path = Arc::new(ytdlp_path);
     let ffmpeg_path = ffmpeg_path.map(Arc::new);
 
     let mut tasks = FuturesUnordered::new();
-    for url in urls {
+    for (id, url) in urls.into_iter().enumerate() {
+        let id = id as u64;
         let permit = sem.clone().acquire_owned().await?;
-        let mp = mp.clone();
-        let slot_pool = slot_pool.clone();
+        let sink = sink.clone();
         let cfg_arc = cfg_arc.clone();
         let ytdlp_path = ytdlp_path.clone();
         let ffmpeg_path = ffmpeg_path.clone();
 
         tasks.push(tokio::spawn(async move {
             let _permit = permit;
-            let slot = slot_pool.lock().await.pop().unwrap_or(0);
-            let pb = progress::make_worker_bar(&mp, slot);
+            sink.emit(DownloadEvent::Started {
+                id,
+                url: url.clone(),
+            });
             let ctx = DownloadCtx {
                 cfg: &cfg_arc,
                 ytdlp_path: ytdlp_path.as_path(),
                 ffmpeg_path: ffmpeg_path.as_deref().map(|p: &PathBuf| p.as_path()),
             };
-            let result = ytdlp::download(&ctx, &url, &pb).await;
+            let result = ytdlp::download(&ctx, &url, id, &sink).await;
             match &result {
-                Ok(o) if o.skipped => pb.finish_with_message(format!("⊘ {url} (skipped)")),
-                Ok(_) => pb.finish_with_message(format!("✓ {url}")),
-                Err(e) => pb.finish_with_message(format!("✗ {url} — {e}")),
+                Ok(o) => sink.emit(DownloadEvent::Completed {
+                    id,
+                    title: o.title.clone(),
+                    path: o.path.as_ref().map(|p| p.display().to_string()),
+                    bytes: o.bytes,
+                    skipped: o.skipped,
+                }),
+                Err(e) => sink.emit(DownloadEvent::Failed {
+                    id,
+                    error: format!("{e}"),
+                }),
             }
-            slot_pool.lock().await.push(slot);
             (url, result)
         }));
     }
@@ -110,9 +140,6 @@ pub async fn run(cfg: &Config, opts: &DownloadOpts, urls: Vec<String>, mode: Mod
 
     while let Some(joined) = tasks.next().await {
         let (url, res) = joined.context("worker task panicked")?;
-        if let Some(pb) = &overall {
-            pb.inc(1);
-        }
         match res {
             Ok(o) => {
                 if o.skipped {
@@ -139,14 +166,6 @@ pub async fn run(cfg: &Config, opts: &DownloadOpts, urls: Vec<String>, mode: Mod
         }
     }
 
-    if let Some(pb) = overall {
-        pb.finish_with_message(if failed_count == 0 {
-            "all done".to_string()
-        } else {
-            format!("done with {failed_count} failure(s)")
-        });
-    }
-
     let elapsed = start.elapsed();
     let summary = build_summary(
         cfg,
@@ -162,15 +181,17 @@ pub async fn run(cfg: &Config, opts: &DownloadOpts, urls: Vec<String>, mode: Mod
         single_url,
         first_error,
     );
-    summary::render(&summary);
 
-    if failed_count > 0 {
-        crate::error::bail!("{failed_count} download(s) failed");
-    }
-    Ok(())
+    Ok(summary)
 }
 
-async fn run_dry(cfg: &Config, opts: &DownloadOpts, urls: Vec<String>, mode: Mode) -> Result<()> {
+async fn run_dry<S: EventSink>(
+    cfg: &Config,
+    opts: &DownloadOpts,
+    urls: Vec<String>,
+    mode: Mode,
+    _sink: &S,
+) -> Result<Summary> {
     // Try to expand a playlist so the count and title are accurate; falls back
     // gracefully if yt-dlp isn't available yet.
     let mut playlist_title: Option<String> = None;
@@ -214,8 +235,7 @@ async fn run_dry(cfg: &Config, opts: &DownloadOpts, urls: Vec<String>, mode: Mod
         urls.first().cloned(),
         None,
     );
-    summary::render(&summary);
-    Ok(())
+    Ok(summary)
 }
 
 #[allow(clippy::too_many_arguments)]

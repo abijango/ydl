@@ -4,10 +4,45 @@ A Rust CLI for downloading YouTube videos, playlists, channels, or arbitrary URL
 
 `ydl` manages its own copies of `yt-dlp` and `ffmpeg` — no separate installation step required.
 
+There is also a **desktop app** (Tauri + React) that reuses the same core engine — see [Desktop app](#desktop-app).
+
+---
+
+## Desktop app
+
+A polished desktop UI (Tauri v2 backend + React/Tailwind frontend) lives alongside the
+CLI. Both share the same `ydl` core library (`src/lib.rs`): the download pipeline emits
+structured events through an [`EventSink`](src/event.rs), which the CLI renders as
+`indicatif` bars and the GUI streams to the webview.
+
+```
+src/          # ydl core library + CLI binary (shared engine)
+src-tauri/    # Tauri backend (commands + event bridge)
+ui/           # React frontend (Vite + Tailwind v4)
+```
+
+Run it in development (needs Node 18+ and the Rust toolchain):
+
+```bash
+npm install          # one-time: frontend deps + Tauri CLI
+npm run tauri dev    # launches the desktop window with hot reload
+```
+
+Build a distributable bundle:
+
+```bash
+npm run tauri build  # produces a native app under target/release/bundle/
+```
+
+The GUI exposes the MVP surface: paste a URL (single / playlist / channel auto-detected),
+watch live per-item progress (speed, ETA, state), edit settings (output dir, quality,
+parallelism, …), and see dependency status — all backed by the same config file the CLI uses.
+
 ---
 
 ## Table of contents
 
+- [Desktop app](#desktop-app)
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Usage](#usage)

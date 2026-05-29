@@ -26,6 +26,54 @@ pub enum Kind {
     },
 }
 
+impl Summary {
+    /// Number of items that failed in this run.
+    pub fn failure_count(&self) -> usize {
+        match &self.kind {
+            Kind::Single { failed, .. } => usize::from(failed.is_some()),
+            Kind::Multi { failed, .. } => *failed,
+        }
+    }
+
+    /// A serializable, UI-friendly projection. The `banner` and `rows` reuse the
+    /// exact same builders as the terminal renderer (sans ANSI color), so the
+    /// desktop app shows identical text to the CLI summary table.
+    pub fn to_dto(&self) -> SummaryDto {
+        SummaryDto {
+            directory: self.directory.display().to_string(),
+            elapsed_ms: self.elapsed.as_millis() as u64,
+            dry_run: self.dry_run,
+            banner: build_banner(self, false),
+            rows: build_rows(self)
+                .into_iter()
+                .map(|(label, value)| SummaryRow {
+                    label: label.to_string(),
+                    value,
+                })
+                .collect(),
+            failures: self.failure_count(),
+        }
+    }
+}
+
+/// Serializable projection of a [`Summary`] for UIs.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryDto {
+    pub directory: String,
+    pub elapsed_ms: u64,
+    pub dry_run: bool,
+    pub banner: String,
+    pub rows: Vec<SummaryRow>,
+    pub failures: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SummaryRow {
+    pub label: String,
+    pub value: String,
+}
+
 const YELLOW: &str = "\x1b[33m";
 const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
