@@ -39,13 +39,22 @@ jobs:
         run: |
           echo "version=$(date -u +%Y).$(date -u +%-m).$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
       - id: notes
-        # One-line, human-readable release note = the subject of the triggering
-        # commit. Captured via a heredoc delimiter so an odd commit message can't
-        # inject extra step outputs.
+        # Release body = the curated entry in ui/release-notes.json whose version
+        # matches this build (single source of truth shared with the in-app
+        # "What's new"). Falls back to the commit subject if there's no entry.
+        env:
+          VERSION: ${{ steps.calver.outputs.version }}
         run: |
+          NOTES=$(jq -r --arg v "$VERSION" '
+            (map(select(.version == $v)) | .[0]) as $e
+            | if $e == null then ""
+              else "**" + $e.headline + "**\n\n" + ($e.notes | map("- " + .) | join("\n"))
+              end
+          ' ui/release-notes.json)
+          if [ -z "$NOTES" ]; then NOTES=$(git log -1 --pretty=%s); fi
           {
             echo "notes<<__YDL_EOF__"
-            git log -1 --pretty=%s
+            printf '%s\n' "$NOTES"
             echo "__YDL_EOF__"
           } >> "$GITHUB_OUTPUT"
       - name: Log version

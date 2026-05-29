@@ -1,0 +1,35 @@
+[
+  {
+    "version": "2026.5.8",
+    "date": "May 2026",
+    "headline": "Notes that match 📝",
+    "notes": [
+      "📝 Release notes now read the same in the app and on the GitHub releases page.",
+      "🔧 One source of truth for every changelog — no more drift."
+    ]
+  },
+  {
+    "version": "2026.5.7",
+    "date": "May 2026",
+    "headline": "The glow-up ✨",
+    "notes": [
+      "🎬 A real desktop app — paste a link and watch it come down. No terminal required.",
+      "🪶 Fresh light look with a hand-lettered “y”.",
+      "⚡ Live progress with real speed and ETA, so you always know what’s left.",
+      "🎚️ Pick quality in plain English — “1080p”, not cryptic codes.",
+      "🗂️ One click to reveal a finished video in Finder.",
+      "🕘 A history of everything you’ve grabbed — browse, reveal, or clear it.",
+      "🧠 Smarter “you already have this” detection, so repeats don’t look broken.",
+      "📁 Saves to your Movies folder by default."
+    ]
+  },
+  {
+    "version": "2026.5.6",
+    "date": "May 2026",
+    "headline": "First light 🌱",
+    "notes": [
+      "📦 The very first public builds — auto-published for macOS and Windows.",
+      "▶️ Download single videos, whole playlists, or entire channels."
+    ]
+  }
+]
