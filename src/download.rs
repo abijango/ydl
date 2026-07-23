@@ -1,7 +1,7 @@
-use crate::cli::DownloadOpts;
+use crate::opts::DownloadOpts;
 use crate::config::Config;
 use crate::deps::{self, Tool};
-use crate::error::{Context, Result};
+use crate::error::{bail, Context, Result};
 use crate::event::{DownloadEvent, EventSink};
 use crate::summary::{Kind, Summary};
 use crate::ytdlp::{self, DownloadCtx, DownloadOutcome};
@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Mode {
@@ -30,7 +31,9 @@ pub fn classify_url(url: &str) -> Mode {
         || u.contains("/c/")
         || u.contains("/user/")
         || u.contains("list=")
-        || u.contains("/playlist");
+        || u.contains("/playlist")
+        || u.contains("youtube.com/playlist")
+        || u.contains("music.youtube.com");
     if is_collection {
         Mode::Playlist
     } else {
@@ -41,12 +44,27 @@ pub fn classify_url(url: &str) -> Mode {
 /// Run a download set, emitting progress through `sink`, and return the
 /// aggregated [`Summary`]. This is the single orchestration entry point shared
 /// by the CLI and the desktop app; it performs no rendering of its own.
+///
+/// When `cancel` is set and cancelled, no new workers are started and in-flight
+/// tasks are aborted (yt-dlp children use `kill_on_drop`).
 pub async fn run_with_sink<S: EventSink>(
     cfg: &Config,
     opts: &DownloadOpts,
     urls: Vec<String>,
     mode: Mode,
     sink: &S,
+) -> Result<Summary> {
+    run_with_sink_cancel(cfg, opts, urls, mode, sink, None).await
+}
+
+/// Same as [`run_with_sink`] with an optional cancellation token.
+pub async fn run_with_sink_cancel<S: EventSink>(
+    cfg: &Config,
+    opts: &DownloadOpts,
+    urls: Vec<String>,
+    mode: Mode,
+    sink: &S,
+    cancel: Option<CancellationToken>,
 ) -> Result<Summary> {
     let start = Instant::now();
 
@@ -57,9 +75,28 @@ pub async fn run_with_sink<S: EventSink>(
     let ytdlp_path = deps::ensure(cfg, Tool::YtDlp, opts.yes, opts.no_autoinstall)
         .await
         .context("ensure yt-dlp")?;
-    let ffmpeg_path = deps::ensure(cfg, Tool::Ffmpeg, opts.yes, opts.no_autoinstall)
-        .await
-        .ok();
+
+    let audio_only = cfg.defaults.audio_only || opts.audio_only;
+    let ffmpeg_path = if audio_only {
+        deps::ensure(cfg, Tool::Ffmpeg, opts.yes, opts.no_autoinstall)
+            .await
+            .ok()
+    } else {
+        Some(
+            deps::ensure(cfg, Tool::Ffmpeg, opts.yes, opts.no_autoinstall)
+                .await
+                .map_err(|e| {
+                    if cfg!(target_os = "macos") {
+                        anyhow::anyhow!(
+                            "{e:#}\n\nffmpeg is required for video downloads. On macOS install it with:\n  brew install ffmpeg"
+                        )
+                    } else {
+                        e
+                    }
+                })
+                .context("ensure ffmpeg")?,
+        )
+    };
 
     // For playlist/channel modes, expand to individual video URLs first so we can
     // drive the overall counter accurately and capture the playlist title.
@@ -70,16 +107,21 @@ pub async fn run_with_sink<S: EventSink>(
             ytdlp_path: &ytdlp_path,
             ffmpeg_path: ffmpeg_path.as_deref(),
         };
-        match ytdlp::expand_playlist(&ctx, &urls[0]).await {
-            Ok((title, ids)) if !ids.is_empty() => {
-                playlist_title = title;
-                ids
-            }
-            _ => urls,
+        let (title, ids) = ytdlp::expand_playlist(&ctx, &urls[0])
+            .await
+            .context("expand playlist/channel")?;
+        if ids.is_empty() {
+            bail!("playlist/channel expansion returned no videos");
         }
+        playlist_title = title;
+        ids
     } else {
         urls
     };
+
+    if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+        bail!("download cancelled");
+    }
 
     sink.emit(DownloadEvent::Expanded {
         total: urls.len(),
@@ -91,18 +133,51 @@ pub async fn run_with_sink<S: EventSink>(
     let cfg_arc = Arc::new(cfg.clone());
     let ytdlp_path = Arc::new(ytdlp_path);
     let ffmpeg_path = ffmpeg_path.map(Arc::new);
+    // Shared base args without the trailing URL — each worker appends its URL.
+    let base_args = Arc::new(ytdlp::build_base_args(
+        &DownloadCtx {
+            cfg: &cfg_arc,
+            ytdlp_path: ytdlp_path.as_path(),
+            ffmpeg_path: ffmpeg_path.as_deref().map(|p: &PathBuf| p.as_path()),
+        },
+    ));
 
     let mut tasks = FuturesUnordered::new();
+    let mut abort_handles = Vec::new();
+    let mut cancelled_before_spawn = false;
+
     for (id, url) in urls.into_iter().enumerate() {
+        if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+            cancelled_before_spawn = true;
+            break;
+        }
+
         let id = id as u64;
-        let permit = sem.clone().acquire_owned().await?;
+        let permit = if let Some(c) = &cancel {
+            tokio::select! {
+                biased;
+                _ = c.cancelled() => {
+                    cancelled_before_spawn = true;
+                    break;
+                }
+                p = sem.clone().acquire_owned() => p?,
+            }
+        } else {
+            sem.clone().acquire_owned().await?
+        };
+
         let sink = sink.clone();
         let cfg_arc = cfg_arc.clone();
         let ytdlp_path = ytdlp_path.clone();
         let ffmpeg_path = ffmpeg_path.clone();
+        let base_args = base_args.clone();
+        let child_cancel = cancel.clone();
 
-        tasks.push(tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let _permit = permit;
+            if child_cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+                return (url, Err(anyhow::anyhow!("download cancelled")));
+            }
             sink.emit(DownloadEvent::Started {
                 id,
                 url: url.clone(),
@@ -112,7 +187,7 @@ pub async fn run_with_sink<S: EventSink>(
                 ytdlp_path: ytdlp_path.as_path(),
                 ffmpeg_path: ffmpeg_path.as_deref().map(|p: &PathBuf| p.as_path()),
             };
-            let result = ytdlp::download(&ctx, &url, id, &sink).await;
+            let result = ytdlp::download_with_base_args(&ctx, &url, id, &sink, &base_args).await;
             match &result {
                 Ok(o) => sink.emit(DownloadEvent::Completed {
                     id,
@@ -127,7 +202,17 @@ pub async fn run_with_sink<S: EventSink>(
                 }),
             }
             (url, result)
-        }));
+        });
+        abort_handles.push(handle.abort_handle());
+        tasks.push(handle);
+    }
+
+    if cancelled_before_spawn {
+        for a in &abort_handles {
+            a.abort();
+        }
+        while tasks.next().await.is_some() {}
+        bail!("download cancelled");
     }
 
     let mut downloaded_count = 0usize;
@@ -138,8 +223,30 @@ pub async fn run_with_sink<S: EventSink>(
     let mut single_url: Option<String> = None;
     let mut first_error: Option<String> = None;
 
-    while let Some(joined) = tasks.next().await {
-        let (url, res) = joined.context("worker task panicked")?;
+    loop {
+        let joined = if let Some(c) = &cancel {
+            tokio::select! {
+                biased;
+                _ = c.cancelled() => {
+                    for a in &abort_handles {
+                        a.abort();
+                    }
+                    while tasks.next().await.is_some() {}
+                    bail!("download cancelled");
+                }
+                j = tasks.next() => j,
+            }
+        } else {
+            tasks.next().await
+        };
+
+        let Some(joined) = joined else { break };
+
+        let (url, res) = match joined {
+            Ok(pair) => pair,
+            Err(e) if e.is_cancelled() => continue,
+            Err(e) => return Err(e).context("worker task panicked"),
+        };
         match res {
             Ok(o) => {
                 if o.skipped {
@@ -154,9 +261,13 @@ pub async fn run_with_sink<S: EventSink>(
                 }
             }
             Err(e) => {
+                let msg = format!("{e:#}");
+                if msg.contains("cancelled") {
+                    continue;
+                }
                 failed_count += 1;
                 if first_error.is_none() {
-                    first_error = Some(format!("{e:#}"));
+                    first_error = Some(msg);
                 }
                 if matches!(mode, Mode::Single) {
                     single_url = Some(url.clone());
@@ -192,8 +303,6 @@ async fn run_dry<S: EventSink>(
     mode: Mode,
     _sink: &S,
 ) -> Result<Summary> {
-    // Try to expand a playlist so the count and title are accurate; falls back
-    // gracefully if yt-dlp isn't available yet.
     let mut playlist_title: Option<String> = None;
     let urls: Vec<String> = if matches!(mode, Mode::Playlist) && urls.len() == 1 {
         match deps::ensure(cfg, Tool::YtDlp, opts.yes, opts.no_autoinstall).await {
@@ -208,7 +317,8 @@ async fn run_dry<S: EventSink>(
                         playlist_title = title;
                         ids
                     }
-                    _ => urls,
+                    Ok(_) => bail!("playlist/channel expansion returned no videos"),
+                    Err(e) => return Err(e).context("expand playlist/channel"),
                 }
             }
             Err(_) => urls,
@@ -227,7 +337,7 @@ async fn run_dry<S: EventSink>(
         Duration::ZERO,
         true,
         playlist_title,
-        urls.len(), // for dry_run, treat all as "would be downloaded"
+        urls.len(),
         0,
         0,
         0,
@@ -291,7 +401,7 @@ fn build_summary(
     }
 }
 
-fn absolute_dir(p: &Path) -> PathBuf {
+pub fn absolute_dir(p: &Path) -> PathBuf {
     if p.is_absolute() {
         p.to_path_buf()
     } else {
@@ -309,4 +419,33 @@ pub async fn read_batch_file(path: &Path) -> Result<Vec<String>> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(|l| l.to_string())
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_single_video() {
+        assert!(matches!(
+            classify_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            Mode::Single
+        ));
+    }
+
+    #[test]
+    fn classify_playlist_and_channel() {
+        assert!(matches!(
+            classify_url("https://www.youtube.com/playlist?list=PLxxx"),
+            Mode::Playlist
+        ));
+        assert!(matches!(
+            classify_url("https://www.youtube.com/@SomeChannel/videos"),
+            Mode::Playlist
+        ));
+        assert!(matches!(
+            classify_url("https://www.youtube.com/channel/UCxxx"),
+            Mode::Playlist
+        ));
+    }
 }

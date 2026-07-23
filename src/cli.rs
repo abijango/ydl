@@ -1,6 +1,9 @@
+#[cfg(feature = "cli")]
 use clap::{Args, Parser, Subcommand};
+use crate::opts::DownloadOpts as CoreDownloadOpts;
 use std::path::PathBuf;
 
+#[cfg(feature = "cli")]
 #[derive(Parser, Debug)]
 #[command(
     name = "ydl",
@@ -17,7 +20,7 @@ pub struct Cli {
 
     /// Options applied when a bare URL is given. Subcommands have their own copies.
     #[command(flatten)]
-    pub opts: DownloadOpts,
+    pub opts: CliDownloadOpts,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -26,25 +29,26 @@ pub struct Cli {
     pub verbose: u8,
 }
 
+#[cfg(feature = "cli")]
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Download every video in a playlist
     Playlist {
         url: String,
         #[command(flatten)]
-        opts: DownloadOpts,
+        opts: CliDownloadOpts,
     },
     /// Download every video on a channel (URL or @handle)
     Channel {
         url: String,
         #[command(flatten)]
-        opts: DownloadOpts,
+        opts: CliDownloadOpts,
     },
     /// Download URLs listed (one per line) in FILE
     Batch {
         file: PathBuf,
         #[command(flatten)]
-        opts: DownloadOpts,
+        opts: CliDownloadOpts,
     },
     /// Manage the TOML config
     Config {
@@ -58,6 +62,7 @@ pub enum Command {
     },
 }
 
+#[cfg(feature = "cli")]
 #[derive(Subcommand, Debug)]
 pub enum ConfigAction {
     /// Print the resolved config
@@ -70,6 +75,7 @@ pub enum ConfigAction {
     Init,
 }
 
+#[cfg(feature = "cli")]
 #[derive(Subcommand, Debug)]
 pub enum DepsAction {
     /// Show installed versions and resolved binary paths
@@ -80,8 +86,9 @@ pub enum DepsAction {
     Update,
 }
 
+#[cfg(feature = "cli")]
 #[derive(Args, Debug, Clone, Default)]
-pub struct DownloadOpts {
+pub struct CliDownloadOpts {
     /// Output directory (overrides config)
     #[arg(short = 'o', long)]
     pub output_dir: Option<PathBuf>,
@@ -102,7 +109,7 @@ pub struct DownloadOpts {
     #[arg(long)]
     pub audio_only: bool,
 
-    /// Filename template (e.g. "{upload_date}-{title}.{ext}")
+    /// Filename template (e.g. "{upload_date}-{title}-{id}.{ext}")
     #[arg(long)]
     pub filename_template: Option<String>,
 
@@ -129,4 +136,24 @@ pub struct DownloadOpts {
     /// Skip auto-installing missing dependencies
     #[arg(long)]
     pub no_autoinstall: bool,
+}
+
+#[cfg(feature = "cli")]
+impl From<CliDownloadOpts> for CoreDownloadOpts {
+    fn from(o: CliDownloadOpts) -> Self {
+        Self {
+            output_dir: o.output_dir,
+            jobs: o.jobs,
+            quality: o.quality,
+            merge_format: o.merge_format,
+            audio_only: o.audio_only,
+            filename_template: o.filename_template,
+            no_archive: o.no_archive,
+            archive: o.archive,
+            dry_run: o.dry_run,
+            update: o.update,
+            yes: o.yes,
+            no_autoinstall: o.no_autoinstall,
+        }
+    }
 }

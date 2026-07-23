@@ -6,9 +6,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type DownloadEvent =
-  | { type: "expanded"; total: number; playlistTitle: string | null }
-  | { type: "started"; id: number; url: string }
+  | { runId: number; type: "expanded"; total: number; playlistTitle: string | null }
+  | { runId: number; type: "started"; id: number; url: string }
   | {
+      runId: number;
       type: "progress";
       id: number;
       downloaded: number;
@@ -17,8 +18,9 @@ export type DownloadEvent =
       eta: number;
       title: string | null;
     }
-  | { type: "status"; id: number; message: string }
+  | { runId: number; type: "status"; id: number; message: string }
   | {
+      runId: number;
       type: "completed";
       id: number;
       title: string | null;
@@ -26,7 +28,7 @@ export type DownloadEvent =
       bytes: number;
       skipped: boolean;
     }
-  | { type: "failed"; id: number; error: string };
+  | { runId: number; type: "failed"; id: number; error: string };
 
 export interface SummaryRow {
   label: string;
@@ -34,6 +36,7 @@ export interface SummaryRow {
 }
 
 export interface SummaryDto {
+  runId?: number;
   directory: string;
   elapsedMs: number;
   dryRun: boolean;
@@ -68,6 +71,7 @@ export interface DepInfo {
   path: string | null;
   version: string | null;
   managed: boolean;
+  installHint?: string | null;
 }
 
 export type UrlMode = "single" | "playlist" | "batch";
@@ -76,12 +80,15 @@ export type UrlMode = "single" | "playlist" | "batch";
 
 export const getConfig = () => invoke<Config>("get_config");
 export const saveConfig = (config: Config) => invoke<void>("save_config", { config });
-export const classifyUrl = (url: string) => invoke<UrlMode>("classify_url", { url });
 export const depsStatus = () => invoke<DepInfo[]>("deps_status");
 export const installDeps = () => invoke<void>("install_deps");
 export const updateDep = (name: string) => invoke<void>("update_dep", { name });
 export const startDownload = (urls: string, audioOnly: boolean) =>
-  invoke<void>("start_download", { urls, audioOnly });
+  invoke<number>("start_download", { urls, audioOnly });
+export const cancelDownload = () => invoke<void>("cancel_download");
+export const clearBusy = () => invoke<void>("clear_busy");
+export const openDownloadPath = (path: string) => invoke<void>("open_download_path", { path });
+export const resolveOutputDir = () => invoke<string>("resolve_output_dir");
 
 /** Reveal a file (highlighted in its folder) or open a directory in the OS file manager. */
 export const revealPath = (path: string) => invoke<void>("reveal_path", { path });
@@ -113,5 +120,24 @@ export const onDownloadEvent = (cb: (e: DownloadEvent) => void): Promise<Unliste
 export const onSummary = (cb: (s: SummaryDto) => void): Promise<UnlistenFn> =>
   listen<SummaryDto>("ydl://summary", (e) => cb(e.payload));
 
-export const onRunError = (cb: (msg: string) => void): Promise<UnlistenFn> =>
-  listen<string>("ydl://error", (e) => cb(e.payload));
+export interface RunErrorPayload {
+  runId: number;
+  message: string;
+}
+
+export const onRunError = (cb: (e: RunErrorPayload) => void): Promise<UnlistenFn> =>
+  listen<RunErrorPayload>("ydl://error", (e) => cb(e.payload));
+
+/** Parse a command error that may be plain text or JSON `{ code, message }`. */
+export function parseCommandError(e: unknown): { code?: string; message: string } {
+  const raw = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+  try {
+    const parsed = JSON.parse(raw) as { code?: string; message?: string };
+    if (parsed && typeof parsed.message === "string") {
+      return { code: parsed.code, message: parsed.message };
+    }
+  } catch {
+    /* plain string */
+  }
+  return { message: raw };
+}

@@ -52,7 +52,8 @@ pub struct DownloadCtx<'a> {
     pub ytdlp_path: &'a Path,
 }
 
-/// Convert "{upload_date}-{title}.{ext}" into yt-dlp's "%(upload_date)s-%(title)s.%(ext)s".
+/// Convert "{upload_date}-{title}-{id}.{ext}" into yt-dlp's
+/// "%(upload_date)s-%(title)s-%(id)s.%(ext)s".
 /// If a token already uses `%(name)s` syntax it is passed through unchanged.
 pub fn translate_template(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
@@ -107,7 +108,7 @@ pub async fn expand_playlist(
 ) -> Result<(Option<String>, Vec<String>)> {
     let title_tpl = format!("{PLAYLIST_TITLE_PREFIX}%(playlist_title,channel,uploader)s");
     let id_tpl = format!("{PLAYLIST_ID_PREFIX}%(url,webpage_url,id)s");
-    let out = Command::new(ctx.ytdlp_path)
+    let mut child = Command::new(ctx.ytdlp_path)
         .arg("--flat-playlist")
         .arg("--print")
         .arg(&title_tpl)
@@ -119,32 +120,59 @@ pub async fn expand_playlist(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
-        .await
+        .spawn()
         .context("spawn yt-dlp --flat-playlist")?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        bail!("yt-dlp --flat-playlist failed: {}", stderr.trim());
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    let stdout = child.stdout.take().expect("stdout piped");
+    let stderr = child.stderr.take().expect("stderr piped");
+
+    let stderr_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        let mut tail: Vec<String> = Vec::new();
+        while let Ok(Some(line)) = reader.next_line().await {
+            if tail.len() >= 20 {
+                tail.remove(0);
+            }
+            tail.push(line);
+        }
+        tail.join("\n")
+    });
+
     let mut title: Option<String> = None;
     let mut ids: Vec<String> = Vec::new();
-    for line in stdout.lines() {
-        let line = line.trim();
-        if let Some(t) = line.strip_prefix(PLAYLIST_TITLE_PREFIX) {
-            if title.is_none() && !t.is_empty() && t != "NA" {
-                title = Some(t.to_string());
-            }
-        } else if let Some(id) = line.strip_prefix(PLAYLIST_ID_PREFIX) {
-            if !id.is_empty() {
-                ids.push(id.to_string());
-            }
-        }
+    let mut reader = BufReader::new(stdout).lines();
+    while let Ok(Some(line)) = reader.next_line().await {
+        parse_flat_playlist_line(&line, &mut title, &mut ids);
+    }
+
+    let stderr = stderr_task.await.unwrap_or_default();
+    let status = child.wait().await.context("wait yt-dlp --flat-playlist")?;
+    if !status.success() {
+        bail!("yt-dlp --flat-playlist failed: {}", stderr.trim());
     }
     Ok((title, ids))
 }
 
-pub fn build_args(ctx: &DownloadCtx<'_>, url: &str) -> Vec<String> {
+/// Parse one line of `yt-dlp --flat-playlist` output.
+pub(crate) fn parse_flat_playlist_line(
+    line: &str,
+    title: &mut Option<String>,
+    ids: &mut Vec<String>,
+) {
+    let line = line.trim();
+    if let Some(t) = line.strip_prefix(PLAYLIST_TITLE_PREFIX) {
+        if title.is_none() && !t.is_empty() && t != "NA" {
+            *title = Some(t.to_string());
+        }
+    } else if let Some(id) = line.strip_prefix(PLAYLIST_ID_PREFIX) {
+        if !id.is_empty() {
+            ids.push(id.to_string());
+        }
+    }
+}
+
+/// Build the shared yt-dlp argument prefix (everything except the URL).
+pub fn build_base_args(ctx: &DownloadCtx<'_>) -> Vec<String> {
     let cfg = ctx.cfg;
     let mut args: Vec<String> = Vec::new();
 
@@ -189,7 +217,11 @@ pub fn build_args(ctx: &DownloadCtx<'_>, url: &str) -> Vec<String> {
     args.push(format!("after_move:{FINAL_PATH_PREFIX}%(filepath)s"));
 
     args.extend(cfg.ytdlp.extra_args.iter().cloned());
+    args
+}
 
+pub fn build_args(ctx: &DownloadCtx<'_>, url: &str) -> Vec<String> {
+    let mut args = build_base_args(ctx);
     args.push(url.to_string());
     args
 }
@@ -201,7 +233,21 @@ pub async fn download<S: EventSink>(
     id: u64,
     sink: &S,
 ) -> Result<DownloadOutcome> {
-    let args = build_args(ctx, url);
+    let base = build_base_args(ctx);
+    download_with_base_args(ctx, url, id, sink, &base).await
+}
+
+/// Like [`download`], reusing a shared base-args template (WP12).
+pub async fn download_with_base_args<S: EventSink>(
+    ctx: &DownloadCtx<'_>,
+    url: &str,
+    id: u64,
+    sink: &S,
+    base_args: &[String],
+) -> Result<DownloadOutcome> {
+    let mut args = Vec::with_capacity(base_args.len() + 1);
+    args.extend_from_slice(base_args);
+    args.push(url.to_string());
     if let Some(d) = ctx.cfg.defaults.output_dir.as_path().parent() {
         let _ = tokio::fs::create_dir_all(d).await;
     }
@@ -345,13 +391,43 @@ mod tests {
     #[test]
     fn translates_braces_to_yt_dlp_syntax() {
         assert_eq!(
-            translate_template("{upload_date}-{title}.{ext}"),
-            "%(upload_date)s-%(title)s.%(ext)s"
+            translate_template("{upload_date}-{title}-{id}.{ext}"),
+            "%(upload_date)s-%(title)s-%(id)s.%(ext)s"
         );
     }
 
     #[test]
     fn passes_through_native_syntax() {
         assert_eq!(translate_template("%(title)s.%(ext)s"), "%(title)s.%(ext)s");
+    }
+
+    #[test]
+    fn parse_flat_playlist_extracts_title_and_ids() {
+        let mut title = None;
+        let mut ids = Vec::new();
+        parse_flat_playlist_line("ydl-pl-title:My Playlist", &mut title, &mut ids);
+        parse_flat_playlist_line("ydl-pl-id:abc123", &mut title, &mut ids);
+        parse_flat_playlist_line("ydl-pl-id:def456", &mut title, &mut ids);
+        assert_eq!(title.as_deref(), Some("My Playlist"));
+        assert_eq!(ids, vec!["abc123", "def456"]);
+    }
+
+    #[test]
+    fn parse_flat_playlist_empty_output_yields_no_ids() {
+        let mut title = None;
+        let mut ids = Vec::new();
+        for line in ["", "  ", "unrelated line"] {
+            parse_flat_playlist_line(line, &mut title, &mut ids);
+        }
+        assert!(title.is_none());
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn parse_flat_playlist_skips_na_title() {
+        let mut title = None;
+        let mut ids = Vec::new();
+        parse_flat_playlist_line("ydl-pl-title:NA", &mut title, &mut ids);
+        assert!(title.is_none());
     }
 }

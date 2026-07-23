@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { classifyUrl, type UrlMode } from "@/lib/api";
+import type { UrlMode } from "@/lib/api";
+import { classifyUrlLocal } from "@/lib/download";
 import { Button, Toggle } from "./ui";
 import { cn } from "@/lib/utils";
 import { ArrowDownToLine, ListVideo, Video, Files } from "lucide-react";
@@ -14,20 +15,25 @@ export function UrlBar({
   busy,
   audioOnly,
   onAudioOnly,
+  value,
+  onChange,
   onSubmit,
 }: {
   busy: boolean;
   audioOnly: boolean;
   onAudioOnly: (v: boolean) => void;
+  value: string;
+  onChange: (v: string) => void;
   onSubmit: (urls: string) => void;
 }) {
-  const [value, setValue] = useState("");
   const [mode, setMode] = useState<UrlMode | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  // Live mode detection, debounced. Multiple lines → batch.
   useEffect(() => {
-    const lines = value.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = value
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (lines.length === 0) {
       setMode(null);
       return;
@@ -36,9 +42,7 @@ export function UrlBar({
       setMode("batch");
       return;
     }
-    const t = setTimeout(() => {
-      classifyUrl(lines[0]).then(setMode).catch(() => setMode(null));
-    }, 160);
+    const t = setTimeout(() => setMode(classifyUrlLocal(lines[0])), 160);
     return () => clearTimeout(t);
   }, [value]);
 
@@ -46,8 +50,6 @@ export function UrlBar({
     const trimmed = value.trim();
     if (!trimmed || busy) return;
     onSubmit(trimmed);
-    setValue("");
-    setMode(null);
   };
 
   const Meta = mode ? MODE_META[mode] : null;
@@ -64,7 +66,7 @@ export function UrlBar({
         <textarea
           ref={ref}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -73,6 +75,7 @@ export function UrlBar({
           }}
           rows={value.includes("\n") ? Math.min(value.split("\n").length, 5) : 1}
           spellCheck={false}
+          aria-label="YouTube URL"
           placeholder="Paste a YouTube URL — video, playlist, channel, or one per line…"
           className="block w-full resize-none bg-transparent px-3 py-2.5 text-[15px] leading-relaxed text-[var(--color-ink)] placeholder:text-[var(--color-faint)] outline-none select-text"
         />
@@ -90,7 +93,12 @@ export function UrlBar({
               )}
             </div>
             <span className="h-4 w-px bg-[var(--color-line-strong)]" />
-            <Toggle checked={audioOnly} onChange={onAudioOnly} label="Audio only" />
+            <Toggle
+              checked={audioOnly}
+              onChange={onAudioOnly}
+              label="Audio only"
+              disabled={busy}
+            />
           </div>
 
           <Button onClick={submit} disabled={!value.trim() || busy}>
@@ -102,6 +110,12 @@ export function UrlBar({
       <p className="mt-2 pl-2 text-xs text-[var(--color-faint)]">
         <kbd className="font-mono text-[var(--color-muted)]">Enter</kbd> to download ·{" "}
         <kbd className="font-mono text-[var(--color-muted)]">Shift+Enter</kbd> for a new line
+        {busy && (
+          <>
+            {" "}
+            · <span className="text-[var(--color-muted)]">Audio toggle locked while downloading</span>
+          </>
+        )}
       </p>
     </div>
   );

@@ -6,12 +6,16 @@
 //! desktop app can consume the same download pipeline as structured data.
 
 pub mod archive;
+#[cfg(feature = "cli")]
 pub mod cli;
 pub mod config;
 pub mod deps;
 pub mod download;
 pub mod error;
 pub mod event;
+pub mod opts;
 pub mod progress;
 pub mod summary;
 pub mod ytdlp;
+
+pub use opts::DownloadOpts;

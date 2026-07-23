@@ -278,7 +278,7 @@ Default contents:
 ```toml
 [defaults]
 output_dir         = "."
-filename_template  = "{upload_date}-{title}.{ext}"
+filename_template  = "{upload_date}-{title}-{id}.{ext}"
 quality            = "bv*+ba/b"      # yt-dlp -f selector
 merge_format       = "mp4"           # passed to --merge-output-format
 audio_only         = false
@@ -322,10 +322,10 @@ extra_args = [
 The default template is:
 
 ```
-{upload_date}-{title}.{ext}
+{upload_date}-{title}-{id}.{ext}
 ```
 
-which produces files like `20240101-Some Video Title.mp4`. The `{name}` placeholders are translated to yt-dlp's native `%(name)s` syntax under the hood, so any field listed in [yt-dlp's output template docs](https://github.com/yt-dlp/yt-dlp#output-template) works:
+which produces files like `20240101-Some Video Title-dQw4w9WgXcQ.mp4`. Including `{id}` keeps distinct videos unique when titles collide. The `{name}` placeholders are translated to yt-dlp's native `%(name)s` syntax under the hood, so any field listed in [yt-dlp's output template docs](https://github.com/yt-dlp/yt-dlp#output-template) works:
 
 | Placeholder | Meaning |
 |---|---|
@@ -343,7 +343,7 @@ Examples:
 
 ```bash
 # Per-channel folders
-ydl channel @SomeChannel --filename-template "{channel}/{upload_date}-{title}.{ext}"
+ydl channel @SomeChannel --filename-template "{channel}/{upload_date}-{title}-{id}.{ext}"
 
 # Numbered tracks for a music playlist
 ydl playlist <URL> --filename-template "{playlist_index:03d}-{title}.{ext}"

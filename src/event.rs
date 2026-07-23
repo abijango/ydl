@@ -17,6 +17,7 @@ pub enum DownloadEvent {
     /// The work-list is known. For playlists/channels this fires after expansion.
     Expanded {
         total: usize,
+        #[serde(rename = "playlistTitle")]
         playlist_title: Option<String>,
     },
     /// A worker picked up `url` and assigned it the stable `id` used by every
@@ -63,4 +64,38 @@ pub struct NullSink;
 
 impl EventSink for NullSink {
     fn emit(&self, _event: DownloadEvent) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_event_serializes_camel_case_type_tag() {
+        let e = DownloadEvent::Progress {
+            id: 1,
+            downloaded: 10,
+            total: 100,
+            speed: 1.5,
+            eta: 9,
+            title: Some("t".into()),
+        };
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["type"], "progress");
+        assert_eq!(v["id"], 1);
+        assert_eq!(v["downloaded"], 10);
+        assert!(v.get("downloadedBytes").is_none());
+    }
+
+    #[test]
+    fn expanded_event_uses_playlist_title_camel_case() {
+        let e = DownloadEvent::Expanded {
+            total: 3,
+            playlist_title: Some("Mix".into()),
+        };
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["type"], "expanded");
+        assert_eq!(v["playlistTitle"], "Mix");
+        assert_eq!(v["total"], 3);
+    }
 }
