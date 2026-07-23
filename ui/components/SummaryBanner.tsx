@@ -1,11 +1,11 @@
-import { revealPath, type SummaryDto } from "@/lib/api";
+import type { SummaryDto } from "@/lib/api";
+import { openDownloadPath } from "@/lib/api";
 import { IconButton } from "./ui";
 import { cn, humanEta } from "@/lib/utils";
 import { CheckCircle2, FolderOpen, X, XCircle } from "lucide-react";
 
 export function SummaryBanner({ summary, onClose }: { summary: SummaryDto; onClose: () => void }) {
   const failed = summary.failures > 0;
-  // The Rust banner is plain text with a leading glyph; strip it for our own icon.
   const headline = summary.banner.replace(/^[✔✗⚠]\s*/u, "");
 
   return (
@@ -38,7 +38,9 @@ export function SummaryBanner({ summary, onClose }: { summary: SummaryDto; onClo
           </dl>
           {!summary.dryRun && (
             <button
-              onClick={() => revealPath(summary.directory).catch(() => {})}
+              onClick={() =>
+                openDownloadPath(summary.directory).catch((e) => console.error("open folder failed", e))
+              }
               className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-accent)] transition-opacity hover:opacity-80"
             >
               <FolderOpen className="h-3.5 w-3.5" /> Open folder

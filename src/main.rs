@@ -2,7 +2,7 @@ mod cli_sink;
 
 use clap::Parser;
 use cli_sink::CliSink;
-use ydl::cli::{Cli, Command, ConfigAction, DepsAction, DownloadOpts};
+use ydl::cli::{Cli, Command, ConfigAction, DepsAction};
 use ydl::error::{Context, Result};
 use ydl::{config, deps, download, summary};
 
@@ -32,29 +32,29 @@ async fn real_main() -> Result<()> {
 
     match cli.command {
         None => match cli.url {
-            Some(url) => run_download(vec![url], cli.opts, download::Mode::Single).await,
+            Some(url) => run_download(vec![url], cli.opts.into(), download::Mode::Single).await,
             // arg_required_else_help should prevent reaching here, but be safe.
             None => anyhow::bail!("a URL or subcommand is required (try `ydl --help`)"),
         },
         Some(Command::Playlist { url, opts }) => {
-            run_download(vec![url], opts, download::Mode::Playlist).await
+            run_download(vec![url], opts.into(), download::Mode::Playlist).await
         }
         Some(Command::Channel { url, opts }) => {
-            run_download(vec![url], opts, download::Mode::Playlist).await
+            run_download(vec![url], opts.into(), download::Mode::Playlist).await
         }
         Some(Command::Batch { file, opts }) => {
             let urls = download::read_batch_file(&file).await?;
             if urls.is_empty() {
                 anyhow::bail!("batch file {} contains no URLs", file.display());
             }
-            run_download(urls, opts, download::Mode::Batch).await
+            run_download(urls, opts.into(), download::Mode::Batch).await
         }
         Some(Command::Config { action }) => handle_config(action).await,
         Some(Command::Deps { action }) => handle_deps(action).await,
     }
 }
 
-async fn run_download(urls: Vec<String>, opts: DownloadOpts, mode: download::Mode) -> Result<()> {
+async fn run_download(urls: Vec<String>, opts: ydl::DownloadOpts, mode: download::Mode) -> Result<()> {
     let mut cfg = config::load_or_init().context("load config")?;
     config::merge_opts(&mut cfg, &opts);
 
@@ -95,16 +95,29 @@ async fn handle_config(action: ConfigAction) -> Result<()> {
             if !path.exists() {
                 config::write_default(&path)?;
             }
-            let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
-                if cfg!(windows) { "notepad".into() } else { "vi".into() }
+            let editor_cmd = std::env::var("EDITOR").unwrap_or_else(|_| {
+                if cfg!(windows) {
+                    "notepad".into()
+                } else {
+                    "vi".into()
+                }
             });
-            let status = tokio::process::Command::new(&editor)
+            let parts: Vec<String> = shell_words::split(&editor_cmd)
+                .with_context(|| format!("parse EDITOR: {editor_cmd}"))?;
+            if parts.is_empty() {
+                anyhow::bail!("EDITOR is empty");
+            }
+            let mut cmd = tokio::process::Command::new(&parts[0]);
+            for arg in &parts[1..] {
+                cmd.arg(arg);
+            }
+            let status = cmd
                 .arg(&path)
                 .status()
                 .await
-                .with_context(|| format!("launch editor {editor}"))?;
+                .with_context(|| format!("launch editor {}", parts[0]))?;
             if !status.success() {
-                anyhow::bail!("editor {editor} exited with {status}");
+                anyhow::bail!("editor {} exited with {status}", parts[0]);
             }
         }
     }

@@ -1,6 +1,9 @@
 import { cn } from "@/lib/utils";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 
+const focusRing =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-panel)]";
+
 export function Button({
   className,
   variant = "primary",
@@ -15,7 +18,7 @@ export function Button({
     outline:
       "border border-[var(--color-line-strong)] text-[var(--color-ink)] px-4 py-2 hover:bg-[var(--color-hover)] hover:border-[var(--color-faint)]",
   };
-  return <button className={cn(base, variants[variant], className)} {...props} />;
+  return <button className={cn(base, variants[variant], focusRing, className)} {...props} />;
 }
 
 export function IconButton({
@@ -27,6 +30,7 @@ export function IconButton({
     <button
       className={cn(
         "grid place-items-center h-9 w-9 rounded-lg text-[var(--color-muted)] transition-colors hover:text-[var(--color-ink)] hover:bg-[var(--color-hover)] active:scale-95",
+        focusRing,
         className,
       )}
       {...props}
@@ -52,6 +56,7 @@ export function TextField({
       <input
         className={cn(
           "w-full rounded-lg bg-[var(--color-panel-2)] border border-[var(--color-line)] px-3.5 py-2.5 text-sm text-[var(--color-ink)] placeholder:text-[var(--color-faint)] outline-none transition-colors focus:border-[var(--color-accent)]/60 focus:bg-[var(--color-panel)] select-text",
+          focusRing,
           className,
         )}
         {...props}
@@ -77,6 +82,7 @@ export function SelectField({
       <select
         className={cn(
           "w-full rounded-lg bg-[var(--color-panel-2)] border border-[var(--color-line)] px-3.5 py-2.5 text-sm text-[var(--color-ink)] outline-none transition-colors focus:border-[var(--color-accent)]/60",
+          focusRing,
           className,
         )}
         {...props}
@@ -91,18 +97,25 @@ export function Toggle({
   checked,
   onChange,
   label,
+  disabled,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className="group inline-flex items-center gap-2.5"
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      className={cn(
+        "group inline-flex items-center gap-2.5",
+        disabled && "opacity-40 pointer-events-none",
+        focusRing,
+      )}
     >
       <span
         className={cn(

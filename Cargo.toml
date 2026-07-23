@@ -7,11 +7,18 @@ version = "0.1.0"
 edition = "2021"
 description = "YouTube downloader CLI built on yt-dlp + ffmpeg with thick indicatif progress bars"
 
+[features]
+default = ["cli"]
+cli = ["dep:clap"]
+
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"], optional = true }
 indicatif = "0.17"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "fs", "sync", "signal"] }
+tokio-util = "0.7"
 futures = "0.3"
+sha2 = "0.10"
+hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -24,6 +31,11 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 tar = "0.4"
 xz2 = "0.1"
 shell-words = "1"
+
+[[bin]]
+name = "ydl"
+path = "src/main.rs"
+required-features = ["cli"]
 
 [profile.release]
 lto = "thin"

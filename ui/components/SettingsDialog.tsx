@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   depsStatus,
   getConfig,
@@ -22,12 +22,14 @@ export function SettingsDialog({
   onDepsChanged?: () => void;
 }) {
   const [cfg, setCfg] = useState<Config | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deps, setDeps] = useState<DepInfo[]>([]);
   const [depBusy, setDepBusy] = useState<string | null>(null);
   const [depError, setDepError] = useState<string | null>(null);
   const [depDone, setDepDone] = useState<{ name: string; msg: string } | null>(null);
   const [qualityCustom, setQualityCustom] = useState(false);
+  const initialRef = useRef<string>("");
 
   const loadDeps = useCallback(() => {
     depsStatus()
@@ -39,11 +41,31 @@ export function SettingsDialog({
     getConfig()
       .then((c) => {
         setCfg(c);
+        initialRef.current = JSON.stringify(c);
         setQualityCustom(isCustomQuality(c.defaults.quality));
+        setLoadError(null);
       })
-      .catch(() => onClose());
+      .catch((e) => setLoadError(String(e)));
     loadDeps();
-  }, [onClose, loadDeps]);
+  }, [loadDeps]);
+
+  const isDirty = cfg !== null && JSON.stringify(cfg) !== initialRef.current;
+
+  const requestClose = useCallback(() => {
+    if (isDirty && !window.confirm("Discard unsaved settings changes?")) return;
+    onClose();
+  }, [isDirty, onClose]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        requestClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [requestClose]);
 
   const runDepAction = async (key: string, fn: () => Promise<void>) => {
     setDepBusy(key);
@@ -59,8 +81,6 @@ export function SettingsDialog({
     }
   };
 
-  // Per-tool update with explicit feedback: spinner → "Updated → x.y" or
-  // "Up to date" (since re-pulling an already-latest tool changes nothing visible).
   const doUpdate = async (dep: DepInfo) => {
     setDepBusy(dep.name);
     setDepError(null);
@@ -102,6 +122,7 @@ export function SettingsDialog({
     setSaving(true);
     try {
       await saveConfig(cfg);
+      initialRef.current = JSON.stringify(cfg);
       onClose();
     } finally {
       setSaving(false);
@@ -110,16 +131,26 @@ export function SettingsDialog({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-6">
-      <div className="absolute inset-0 bg-[var(--color-scrim)] backdrop-blur-sm animate-fade-up" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-[var(--color-scrim)] backdrop-blur-sm animate-fade-up"
+        onClick={requestClose}
+      />
       <div className="animate-rise relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--color-line-strong)] bg-[var(--color-panel)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--color-line)] px-6 py-4">
           <h2 className="font-display text-lg font-bold tracking-tight">Settings</h2>
-          <IconButton onClick={onClose} aria-label="Close">
+          <IconButton onClick={requestClose} aria-label="Close">
             <X className="h-5 w-5" />
           </IconButton>
         </div>
 
-        {cfg ? (
+        {loadError ? (
+          <div className="px-6 py-12 text-center">
+            <p className="text-sm text-[var(--color-bad)] select-text">Failed to load settings: {loadError}</p>
+            <Button variant="ghost" onClick={requestClose} className="mt-4">
+              Close
+            </Button>
+          </div>
+        ) : cfg ? (
           <div className="max-h-[60vh] space-y-5 overflow-y-auto px-6 py-5">
             <div>
               <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.14em] text-[var(--color-faint)]">
@@ -129,7 +160,7 @@ export function SettingsDialog({
                 <input
                   value={cfg.defaults.output_dir}
                   onChange={(e) => patch("defaults", { ...cfg.defaults, output_dir: e.target.value })}
-                  className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-[var(--color-accent)]/60 select-text"
+                  className="w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-[var(--color-accent)]/60 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/30 select-text"
                 />
                 <Button variant="outline" onClick={pickDir} className="shrink-0">
                   <FolderSearch className="h-4 w-4" /> Browse
@@ -213,7 +244,6 @@ export function SettingsDialog({
               </div>
             </div>
 
-            {/* Dependencies */}
             <div className="border-t border-[var(--color-line)] pt-5">
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--color-faint)]">
@@ -235,20 +265,25 @@ export function SettingsDialog({
                     key={d.name}
                     className="flex items-center justify-between rounded-lg border border-[var(--color-line)] bg-[var(--color-panel-2)] px-3 py-2.5"
                   >
-                    <div className="flex min-w-0 items-center gap-2">
-                      {d.installed ? (
-                        <CircleCheck className="h-4 w-4 shrink-0 text-[var(--color-ok)]" />
-                      ) : (
-                        <CircleAlert className="h-4 w-4 shrink-0 text-[var(--color-bad)]" />
-                      )}
-                      <span className="font-mono text-sm text-[var(--color-ink)]">{d.name}</span>
-                      <span className="truncate font-mono text-xs text-[var(--color-faint)]">
-                        {d.version ?? (d.installed ? "installed" : "not installed")}
-                      </span>
-                      {d.installed && !d.managed && (
-                        <span className="rounded-full border border-[var(--color-line)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
-                          system
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        {d.installed ? (
+                          <CircleCheck className="h-4 w-4 shrink-0 text-[var(--color-ok)]" />
+                        ) : (
+                          <CircleAlert className="h-4 w-4 shrink-0 text-[var(--color-bad)]" />
+                        )}
+                        <span className="font-mono text-sm text-[var(--color-ink)]">{d.name}</span>
+                        <span className="truncate font-mono text-xs text-[var(--color-faint)]">
+                          {d.version ?? (d.installed ? "installed" : "not installed")}
                         </span>
+                        {d.installed && !d.managed && (
+                          <span className="rounded-full border border-[var(--color-line)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-faint)]">
+                            system
+                          </span>
+                        )}
+                      </div>
+                      {!d.installed && d.installHint && (
+                        <p className="mt-1 pl-6 text-xs text-[var(--color-muted)] select-text">{d.installHint}</p>
                       )}
                     </div>
                     {d.managed && (
@@ -297,7 +332,7 @@ export function SettingsDialog({
               )}
 
               {depError && (
-                <p className="mt-2.5 text-xs text-[var(--color-bad)]">{depError}</p>
+                <p className="mt-2.5 text-xs text-[var(--color-bad)] select-text">{depError}</p>
               )}
             </div>
           </div>
@@ -305,14 +340,16 @@ export function SettingsDialog({
           <div className="px-6 py-12 text-center text-sm text-[var(--color-faint)]">Loading…</div>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-[var(--color-line)] px-6 py-4">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={!cfg || saving}>
-            {saving ? "Saving…" : "Save changes"}
-          </Button>
-        </div>
+        {!loadError && (
+          <div className="flex justify-end gap-2 border-t border-[var(--color-line)] px-6 py-4">
+            <Button variant="ghost" onClick={requestClose}>
+              Cancel
+            </Button>
+            <Button onClick={save} disabled={!cfg || saving || !isDirty}>
+              {saving ? "Saving…" : "Save changes"}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

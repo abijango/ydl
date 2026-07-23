@@ -5,10 +5,12 @@ import { Settings2, Download, CircleCheck, CircleAlert, Loader2, History } from 
 import logo from "@/assets/logo.png";
 
 function DepPill({ dep }: { dep: DepInfo }) {
+  const hint = !dep.installed && dep.installHint ? dep.installHint : (dep.path ?? "not installed");
+
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-panel)] px-2.5 py-1 text-xs"
-      title={dep.installed ? (dep.path ?? "installed") : "not installed — update in Settings"}
+      title={hint}
     >
       {dep.installed ? (
         <CircleCheck className="h-3.5 w-3.5 text-[var(--color-ok)]" />
@@ -38,6 +40,7 @@ export function StatusBar({
   onOpenAbout: () => void;
 }) {
   const missing = deps.some((d) => !d.installed);
+  const installHint = deps.find((d) => !d.installed && d.installHint)?.installHint;
 
   return (
     <header
@@ -63,6 +66,7 @@ export function StatusBar({
           <button
             onClick={onInstall}
             disabled={installing}
+            title={installHint ?? undefined}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border border-[var(--color-bad)]/40 bg-[var(--color-bad)]/10 px-3 py-1 text-xs font-medium text-[var(--color-bad)] transition-colors hover:bg-[var(--color-bad)]/20 disabled:opacity-60",
             )}

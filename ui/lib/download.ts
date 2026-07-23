@@ -1,4 +1,19 @@
-import type { DownloadEvent } from "./api";
+import type { DownloadEvent, UrlMode } from "./api";
+
+/** Client-side port of `ydl::download::classify_url` heuristics. */
+export function classifyUrlLocal(url: string): UrlMode {
+  const u = url.toLowerCase();
+  const isCollection =
+    u.includes("/@") ||
+    u.includes("/channel/") ||
+    u.includes("/c/") ||
+    u.includes("/user/") ||
+    u.includes("list=") ||
+    u.includes("/playlist") ||
+    u.includes("youtube.com/playlist") ||
+    u.includes("music.youtube.com");
+  return isCollection ? "playlist" : "single";
+}
 
 export type DownloadState =
   | "starting"

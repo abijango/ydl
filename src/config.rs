@@ -1,10 +1,10 @@
-use crate::cli::DownloadOpts;
+use crate::opts::DownloadOpts;
 use crate::error::{Context, Result};
 use directories::{ProjectDirs, UserDirs};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub defaults: Defaults,
@@ -42,25 +42,15 @@ pub struct Archive {
 pub struct YtDlpCfg {
     pub binary: String,
     pub auto_install: bool,
+    /// Reserved for future automatic yt-dlp updates on ensure.
+    #[allow(dead_code)]
     pub auto_update: bool,
     pub extra_args: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FfmpegCfg {
     pub binary: String,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            defaults: Defaults::default(),
-            parallel: Parallel::default(),
-            archive: Archive::default(),
-            ytdlp: YtDlpCfg::default(),
-            ffmpeg: FfmpegCfg::default(),
-        }
-    }
 }
 
 impl Default for Defaults {
@@ -107,14 +97,6 @@ impl Default for YtDlpCfg {
             auto_install: true,
             auto_update: false,
             extra_args: Vec::new(),
-        }
-    }
-}
-
-impl Default for FfmpegCfg {
-    fn default() -> Self {
-        Self {
-            binary: String::new(),
         }
     }
 }
