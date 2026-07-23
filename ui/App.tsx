@@ -267,15 +267,6 @@ export default function App() {
       />
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-7 overflow-hidden px-6 pt-8">
-        <div>
-          <h1 className="font-display text-[26px] font-extrabold leading-tight tracking-tight">
-            Pull anything down.
-          </h1>
-          <p className="mt-1 text-sm text-[var(--color-muted)]">
-            Drop a link — ydl figures out whether it's a video, playlist, or channel.
-          </p>
-        </div>
-
         <div className="flex flex-wrap items-center gap-2">
           {outputPath && (
             <button

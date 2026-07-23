@@ -57,7 +57,7 @@ impl Default for Defaults {
     fn default() -> Self {
         Self {
             output_dir: default_output_dir(),
-            filename_template: "{upload_date}-{title}.{ext}".to_string(),
+            filename_template: "{upload_date}-{title}-{id}.{ext}".to_string(),
             quality: "bv*+ba/b".to_string(),
             merge_format: "mp4".to_string(),
             audio_only: false,

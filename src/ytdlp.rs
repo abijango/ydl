@@ -52,7 +52,8 @@ pub struct DownloadCtx<'a> {
     pub ytdlp_path: &'a Path,
 }
 
-/// Convert "{upload_date}-{title}.{ext}" into yt-dlp's "%(upload_date)s-%(title)s.%(ext)s".
+/// Convert "{upload_date}-{title}-{id}.{ext}" into yt-dlp's
+/// "%(upload_date)s-%(title)s-%(id)s.%(ext)s".
 /// If a token already uses `%(name)s` syntax it is passed through unchanged.
 pub fn translate_template(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
@@ -390,8 +391,8 @@ mod tests {
     #[test]
     fn translates_braces_to_yt_dlp_syntax() {
         assert_eq!(
-            translate_template("{upload_date}-{title}.{ext}"),
-            "%(upload_date)s-%(title)s.%(ext)s"
+            translate_template("{upload_date}-{title}-{id}.{ext}"),
+            "%(upload_date)s-%(title)s-%(id)s.%(ext)s"
         );
     }
 

@@ -109,7 +109,7 @@ pub struct CliDownloadOpts {
     #[arg(long)]
     pub audio_only: bool,
 
-    /// Filename template (e.g. "{upload_date}-{title}.{ext}")
+    /// Filename template (e.g. "{upload_date}-{title}-{id}.{ext}")
     #[arg(long)]
     pub filename_template: Option<String>,
 

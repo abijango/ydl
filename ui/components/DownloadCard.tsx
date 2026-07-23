@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { cn, humanBytes, humanEta, humanSpeed } from "@/lib/utils";
 import type { DownloadItem, DownloadState } from "@/lib/download";
-import { openDownloadPath } from "@/lib/api";
+import { revealPath } from "@/lib/api";
 import { Check, FolderOpen, Loader2, SkipForward, TriangleAlert } from "lucide-react";
 
 const STATE_META: Record<DownloadState, { label: string; color: string; dot: string }> = {
@@ -122,7 +122,7 @@ export const DownloadCard = memo(function DownloadCard({
               )}
               {item.path && (item.state === "done" || item.state === "skipped") && (
                 <button
-                  onClick={() => openDownloadPath(item.path!).catch(() => {})}
+                  onClick={() => revealPath(item.path!).catch(() => {})}
                   className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[var(--color-faint)] transition-colors hover:text-[var(--color-accent)]"
                   title={item.path}
                 >
