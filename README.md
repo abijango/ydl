@@ -77,11 +77,13 @@ ui/           # React frontend (Vite + Tailwind v4)
 ```bash
 npm install          # one-time: frontend deps + Tauri CLI
 npm run tauri dev    # dev window with hot reload
-npm run tauri build  # bundle installers into target/release/bundle/
+npm run tauri:build  # stamps CalVer, then bundles into target/release/bundle/
 ```
 
 Every push to `main` also auto-builds and publishes the macOS + Windows installers via GitHub
-Actions (CalVer `YYYY.M.<commit-count>`).
+Actions (CalVer `YYYY.M.<commit-count>`). Before a notable main commit, add a matching entry to
+[`ui/release-notes.json`](ui/release-notes.json) keyed with `node scripts/version:next` /
+`node scripts/next-version.mjs` so the in-app “What’s new” and the GitHub release body stay in sync.
 
 ---
 
@@ -431,7 +433,7 @@ cargo test                       # unit tests live in the core library
 
 # Desktop app — needs Node + the Tauri toolchain
 npm install
-npm run tauri build              # → target/release/bundle/
+npm run tauri:build              # stamps CalVer → target/release/bundle/
 ```
 
 Strip + LTO are enabled in the release profile, so the CLI binary is ~6 MB. The CLI has no

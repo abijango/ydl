@@ -68,6 +68,16 @@ export default function App() {
 
   const itemsRef = useRef<Map<number, DownloadItem>>(new Map());
   const activeRunIdRef = useRef<number | null>(null);
+
+  /** Adopt the first runId we see for this submit; ignore events from other runs. */
+  const isActiveRun = (runId: number | undefined) => {
+    if (runId === undefined) return true;
+    if (activeRunIdRef.current === null) {
+      activeRunIdRef.current = runId;
+      return true;
+    }
+    return runId === activeRunIdRef.current;
+  };
   const rafRef = useRef<number | null>(null);
   const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -134,7 +144,7 @@ export default function App() {
 
     const unsubs: Array<Promise<() => void>> = [
       onDownloadEvent((e) => {
-        if (e.runId !== activeRunIdRef.current) return;
+        if (!isActiveRun(e.runId)) return;
         if (e.type === "expanded") {
           setTotal(e.total);
           setPlaylistTitle(e.playlistTitle);
@@ -157,7 +167,7 @@ export default function App() {
         scheduleCommit();
       }),
       onSummary((s) => {
-        if (s.runId !== undefined && s.runId !== activeRunIdRef.current) return;
+        if (!isActiveRun(s.runId)) return;
         setBusy(false);
         clearBusy().catch(() => {});
         setSummary(s);
@@ -166,7 +176,7 @@ export default function App() {
         refreshOutputInfo();
       }),
       onRunError((e) => {
-        if (e.runId !== activeRunIdRef.current) return;
+        if (!isActiveRun(e.runId)) return;
         setBusy(false);
         clearBusy().catch(() => {});
         setRunError(e.message);
@@ -199,9 +209,14 @@ export default function App() {
     lastSubmittedUrlRef.current = urls;
     setTotal(urls.split("\n").filter((l) => l.trim()).length);
     setBusy(true);
+    // Clear so the first event OR the invoke result can claim this run (avoids
+    // dropping Started/progress that arrive before startDownload resolves).
+    activeRunIdRef.current = null;
     startDownload(urls, audioOnly)
       .then((runId) => {
-        activeRunIdRef.current = runId;
+        if (activeRunIdRef.current === null) {
+          activeRunIdRef.current = runId;
+        }
       })
       .catch((e) => {
         setBusy(false);

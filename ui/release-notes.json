@@ -1,5 +1,27 @@
 [
   {
+    "version": "2026.7.14",
+    "date": "Jul 2026",
+    "headline": "Versions that match 🏷️",
+    "notes": [
+      "🏷️ Local builds stamp CalVer (YYYY.M.commit-count) like CI — no more fake v0.1.0.",
+      "📝 Release notes catch up for the July hardening release.",
+      "🐛 Progress UI no longer stays on “Preparing…” when events arrive before the run id."
+    ]
+  },
+  {
+    "version": "2026.7.13",
+    "date": "Jul 2026",
+    "headline": "Faster, safer downloads ⚡",
+    "notes": [
+      "⚡ Progress updates are throttled so big queues stay smooth.",
+      "🛑 Cancel an in-progress run without quitting the app.",
+      "🔐 Managed yt-dlp/ffmpeg installs verify SHA-256 checksums.",
+      "📁 Filenames include the video id so same-title Twitch VODs don’t collide.",
+      "🧹 Cleaner home screen — less chrome, same paste-and-go flow."
+    ]
+  },
+  {
     "version": "2026.5.9",
     "date": "May 2026",
     "headline": "macOS, sorted 🍎",

@@ -4,9 +4,10 @@ import { X } from "lucide-react";
 import logo from "@/assets/logo.png";
 
 export function AboutDialog({ version, onClose }: { version: string; onClose: () => void }) {
-  // Badge the entry matching the running build; fall back to the newest entry.
-  const latestVersion =
-    RELEASE_NOTES.find((r) => r.version === version)?.version ?? RELEASE_NOTES[0]?.version;
+  // Newest curated notes entry (CalVer). Distinct from the running binary version,
+  // which may briefly differ on a local unstamped build.
+  const latestNotesVersion = RELEASE_NOTES[0]?.version;
+  const runningMatchesNotes = RELEASE_NOTES.some((r) => r.version === version);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-6">
       <div className="absolute inset-0 bg-[var(--color-scrim)] backdrop-blur-sm animate-fade-up" onClick={onClose} />
@@ -38,7 +39,7 @@ export function AboutDialog({ version, onClose }: { version: string; onClose: ()
             <section key={r.version}>
               <div className="mb-2.5 flex items-center gap-2">
                 <span className="font-mono text-sm font-semibold text-[var(--color-ink)]">v{r.version}</span>
-                {r.version === latestVersion && (
+                {r.version === (runningMatchesNotes ? version : latestNotesVersion) && (
                   <span className="rounded-full bg-[var(--color-accent)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-ink)]">
                     Latest
                   </span>

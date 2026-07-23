@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:build": "node scripts/stamp-current-version.mjs && tauri build",
+    "version:next": "node scripts/next-version.mjs",
+    "version:current": "node scripts/current-version.mjs"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.8",
